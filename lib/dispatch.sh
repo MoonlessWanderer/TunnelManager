@@ -157,6 +157,9 @@ tm_main() {
     service)
       tm_dispatch_service "$@"
       ;;
+    update)
+      tm_action_update "$@"
+      ;;
     *)
       tm_die "Unknown command '${cmd}'. See: tunnel-manager help"
       ;;

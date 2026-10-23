@@ -61,7 +61,7 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
   systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 
-rm -f -- "${PREFIX}/bin/tunnel-manager"
+rm -f -- "${PREFIX}/bin/tunnel-manager" "${PREFIX}/bin/tm"
 rm -rf -- "${PREFIX}/lib/tunnel-manager"
 rm -rf -- "${PREFIX}/share/tunnel-manager"
 

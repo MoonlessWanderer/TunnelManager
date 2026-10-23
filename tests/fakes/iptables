@@ -2,8 +2,9 @@
 # Fake iptables used by unit tests. It never flushes.
 set -euo pipefail
 ROOT="${TM_FAKE_ROOT:?}"
-STATE="${ROOT}/iptables.state"
-LOG="${ROOT}/iptables.log"
+TAG="${TM_FAKE_TABLE_TAG:-iptables}"
+STATE="${ROOT}/${TAG}.state"
+LOG="${ROOT}/${TAG}.log"
 mkdir -p -- "$ROOT"
 touch "$STATE"
 printf '%s\n' "$*" >>"$LOG"
@@ -21,8 +22,8 @@ for arg in "$@"; do
 done
 
 if [[ "${1:-}" == "-V" || "${1:-}" == "--version" ]]; then
-  if [[ -f "${ROOT}/iptables.version" ]]; then
-    cat "${ROOT}/iptables.version"
+  if [[ -f "${ROOT}/${TAG}.version" ]]; then
+    cat "${ROOT}/${TAG}.version"
   else
     printf '%s\n' "iptables v1.8.9 (nf_tables)"
   fi
@@ -86,8 +87,8 @@ case "$action" in
   -S|--list-rules)
     if [[ -z "$chain" ]]; then
       printf '%s\n' "-P INPUT ACCEPT" "-P FORWARD ACCEPT" "-P OUTPUT ACCEPT"
-      if [[ -f "${ROOT}/iptables.user-rules" ]]; then
-        cat "${ROOT}/iptables.user-rules"
+      if [[ -f "${ROOT}/${TAG}.user-rules" ]]; then
+        cat "${ROOT}/${TAG}.user-rules"
       fi
       exit 0
     fi

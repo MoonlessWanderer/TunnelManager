@@ -21,6 +21,26 @@ tm_doctor_fail() {
   TM_DOCTOR_FAIL=1
 }
 
+tm_doctor_ipv6_endpoint() {
+  local name
+  local -A row=()
+  local need=0
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    tm_tunnel_load "$name" row || continue
+    if tm_valid_ipv6 "${row[TM_LOCAL_PUBLIC_IP]:-}"; then
+      need=1
+      break
+    fi
+  done < <(tm_list_tunnels)
+  [[ "$need" -eq 1 ]] || return 0
+  if tm_cmd_available ip6tables || tm_cmd_available nft; then
+    tm_doctor_pass "IPv6 tunnel endpoints have ip6tables or nft available."
+  else
+    tm_doctor_warn "An IPv6 tunnel endpoint is saved, and neither ip6tables nor nft is available."
+  fi
+}
+
 tm_action_doctor() {
   local value cmd
   TM_DOCTOR_FAIL=0
@@ -70,6 +90,7 @@ tm_action_doctor() {
       tm_doctor_warn "net.ipv4.ip_forward is ${value:-unset}. UDP forwarding needs it; TCP HAProxy does not."
     fi
   fi
+  tm_doctor_ipv6_endpoint
   if tm_journal_exists; then
     tm_doctor_warn "A rollback journal exists. Run: tunnel-manager rollback"
   else

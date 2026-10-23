@@ -23,7 +23,20 @@ not skip that confirmation.
 
 ## Install
 
-On each server:
+On each Debian or Ubuntu server, one command downloads and installs the tool.
+It does not enable services, flush firewall rules, or change the default route.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MoonlessWanderer/TunnelManager/main/get.sh | sudo bash
+```
+
+Open the menu:
+
+```bash
+sudo tm
+```
+
+Or install from a checkout:
 
 ```bash
 sudo ./install.sh
@@ -67,8 +80,15 @@ sudo tunnel-manager tunnel test --name edge
 sudo tunnel-manager doctor
 ```
 
-Run `tunnel-manager` with no arguments on a terminal to open the menu.
+Run `tm` or `tunnel-manager` with no arguments on a terminal to open the menu.
+Menu item 13, or `tunnel-manager update`, downloads the main branch and
+reinstalls the program. It keeps saved tunnels and does not enable services.
 `tunnel-manager --dry-run apply` prints the plan and does not change the system.
+
+IPv6 tunnel addresses use prefix 64-127. An IPv6 public endpoint uses
+`ip6gre` for GRE and `ip6tables` only when the iptables backend is selected.
+WireGuard `AllowedIPs` stays a single host: `/32` or `/128`. UDP port
+forwarding remains IPv4. TCP forwarding can target an IPv6 address.
 
 ## Safety
 

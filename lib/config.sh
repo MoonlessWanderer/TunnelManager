@@ -294,7 +294,8 @@ tm_kv_value_ok() {
   ((${#value} <= 220)) || return 1
   # Slash is allowed so a private-key path can be stored. ".." is not.
   [[ "$value" != *..* ]] || return 1
-  [[ "$value" =~ ^[A-Za-z0-9._+/=:@,/-]+$ ]] || return 1
+  # Colon is allowed for IPv6 addresses. ".." is still rejected above.
+  [[ "$value" =~ ^[A-Za-z0-9._+/=:@,:/-]+$ ]] || return 1
   return 0
 }
 

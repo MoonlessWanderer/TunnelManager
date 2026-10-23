@@ -130,6 +130,7 @@ fi
 
 install -d -m 0755 "${BIN_DEST}" "${LIB_DEST}" "${SHARE_DEST}/examples" "${SHARE_DEST}/docs" "${SHARE_DEST}/systemd"
 install -m 0755 "${ROOT}/bin/tunnel-manager" "${BIN_DEST}/tunnel-manager"
+install -m 0755 "${ROOT}/bin/tm" "${BIN_DEST}/tm"
 local_sh=""
 for local_sh in "${ROOT}/lib/"*.sh; do
   install -m 0644 "$local_sh" "${LIB_DEST}/$(basename "$local_sh")"
@@ -181,6 +182,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
 fi
 
 printf '%s\n' "Installed Tunnel Manager into ${PREFIX}."
+printf '%s\n' "Open the menu with: sudo ${BIN_DEST}/tm"
 printf '%s\n' "Next: sudo ${BIN_DEST}/tunnel-manager init --role iran|foreign ..."
 printf '%s\n' "Services stay disabled until: sudo ${BIN_DEST}/tunnel-manager service enable"
 if [[ "$ASSUME_YES" -eq 0 ]]; then

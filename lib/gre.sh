@@ -29,14 +29,21 @@ tm_gre_up_exec() {
   local local_tun="$4"
   local prefix="$5"
   local mtu="$6"
-  local iface
+  local iface family
   iface=$(tm_tunnel_iface "$name")
-  tm_must modprobe ip_gre || return 1
+  family=$(tm_ip_family "$local_pub") || return 1
+  [[ "$family" == "$(tm_ip_family "$remote_pub")" ]] || return 1
   if tm_iface_exists "$iface"; then
     tm_info "GRE interface ${iface} already exists."
     return 0
   fi
-  tm_must ip link add name "$iface" type gre local "$local_pub" remote "$remote_pub" ttl 255 || return 1
+  if [[ "$family" == "6" ]]; then
+    tm_must modprobe ip6_gre || return 1
+    tm_must ip link add name "$iface" type ip6gre local "$local_pub" remote "$remote_pub" ttl 255 || return 1
+  else
+    tm_must modprobe ip_gre || return 1
+    tm_must ip link add name "$iface" type gre local "$local_pub" remote "$remote_pub" ttl 255 || return 1
+  fi
   tm_must ip link set dev "$iface" mtu "$mtu" || return 1
   tm_must ip addr add "${local_tun}/${prefix}" dev "$iface" || return 1
   tm_must ip link set dev "$iface" up || return 1

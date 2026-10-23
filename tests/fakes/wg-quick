@@ -12,6 +12,7 @@ if [[ "$action" == "up" ]]; then
   text=$(tr -d '\r' <"$conf")
   [[ "$text" == *"Table = off"* ]] || exit 1
   [[ "$text" != *"0.0.0.0/0"* ]] || exit 1
+  [[ "$text" != *"::/0"* ]] || exit 1
   printf '%s\n' "$iface" >>"${ROOT}/wg.up"
   printf '%s\n' "$iface" >>"${ROOT}/ip.links"
   exit 0

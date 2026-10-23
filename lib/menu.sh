@@ -108,11 +108,15 @@ tm_menu_create_tunnel() {
   local name="" type="" local_pub="" remote_pub="" local_tun="" remote_tun="" wan="" peer="" cidr="30"
   tm_prompt name "Tunnel name" || return 1
   tm_prompt type "Type: wireguard or gre" "wireguard" || return 1
-  tm_prompt local_pub "Local reachable IP" || return 1
-  tm_prompt remote_pub "Remote reachable IP" || return 1
+  tm_prompt local_pub "Local reachable IPv4 or IPv6" || return 1
+  tm_prompt remote_pub "Remote reachable IPv4 or IPv6" || return 1
   tm_prompt local_tun "Local tunnel IP" || return 1
   tm_prompt remote_tun "Remote tunnel IP" || return 1
-  tm_prompt cidr "Prefix length" "30" || return 1
+  if [[ "$local_tun" == *:* ]]; then
+    tm_prompt cidr "Prefix length" "64" || return 1
+  else
+    tm_prompt cidr "Prefix length" "30" || return 1
+  fi
   tm_prompt wan "WAN interface" || return 1
   if [[ "$type" == "wireguard" ]]; then
     tm_prompt peer "Peer public key, or '-' to generate a pending tunnel" "-" || return 1
@@ -159,6 +163,7 @@ tm_menu() {
     printf '%s\n' " 10) Apply saved state"
     printf '%s\n' " 11) Dry-run apply"
     printf '%s\n' " 12) Roll back an interrupted change"
+    printf '%s\n' " 13) Update Tunnel Manager"
     printf '%s\n' "  0) Exit"
     tm_prompt choice "Choose" || return 1
     case "$choice" in
@@ -182,6 +187,7 @@ tm_menu() {
       10) tm_menu_run tm_action_apply ;;
       11) tm_menu_run tm_action_apply --dry-run ;;
       12) tm_menu_run tm_action_rollback ;;
+      13) tm_menu_run tm_action_update ;;
       0) tm_info "Goodbye."; return 0 ;;
       *) tm_warn "Unknown choice." ;;
     esac

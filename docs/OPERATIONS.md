@@ -35,8 +35,28 @@ sudo tunnel-manager tunnel test --name edge
 ```
 
 `tunnel test` checks that the interface exists and pings the peer tunnel
-address. A ping failure is reported as a test result. It does not roll back
-the tunnel, because the peer may not be ready yet.
+address. IPv6 peers are probed with `ping -6`. A ping failure is reported as
+a test result. It does not roll back the tunnel, because the peer may not be
+ready yet.
+
+An IPv6 tunnel uses the same commands. IPv4 inner prefixes are 24-31 and IPv6
+inner prefixes are 64-127. Leave `--cidr` unset to get 30 or 64 from the
+address family. UDP forwarding still requires IPv4. TCP forwarding accepts
+an IPv6 destination.
+
+```bash
+sudo tm
+sudo tunnel-manager tunnel create --name edge6 --type wireguard \
+  --local-public-ip 2001:db8::10 --remote-public-ip 2001:db8::20 \
+  --local-tunnel-ip 2001:db8:1::1 --remote-tunnel-ip 2001:db8:1::2 \
+  --wan-iface eth0 --peer-public-key 'PEER_PUBLIC_KEY'
+```
+
+Update the installed program from the menu or with:
+
+```bash
+sudo tunnel-manager update
+```
 
 ## Forwards
 

@@ -18,14 +18,17 @@ A tunnel name matches `^[a-z][a-z0-9-]{0,11}$`. The interface is `tm-<name>`
 and stays within the 15-character interface limit.
 
 WireGuard configuration is written to `/etc/wireguard/tm-<name>.conf` with
-`Table = off` and `AllowedIPs = <peer>/32`. The private key is stored at
-`/etc/tunnel-manager/keys/<name>.key`. A missing peer public key leaves the
-tunnel in `pending-peer` and does not start it.
+`Table = off` and `AllowedIPs` set to the peer host only (`/32` or `/128`).
+The private key is stored at `/etc/tunnel-manager/keys/<name>.key`. A missing
+peer public key leaves the tunnel in `pending-peer` and does not start it.
+IPv6 endpoints are written as `[address]:port`. The outer and inner families
+may differ. The two addresses of each pair must use one family.
 
-GRE uses `ip link add type gre` with a unicast local and remote address, a
-TTL, an MTU, and an address in a `/24` through `/31`. There is no encryption
-and no authentication. The acknowledgement is stored as `TM_GRE_ACK=yes`.
-The tool never runs `ip route add`, `replace`, or `del`.
+GRE uses `ip link add type gre` for IPv4 endpoints and `type ip6gre` for IPv6
+endpoints. The inner address is IPv4 `/24` through `/31`, or IPv6 `/64`
+through `/127`. There is no encryption and no authentication. The
+acknowledgement is stored as `TM_GRE_ACK=yes`. The tool never runs
+`ip route add`, `replace`, or `del`.
 
 `apply` records whether a tunnel interface was already up. Rollback stops
 only a tunnel that this run started.

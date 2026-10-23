@@ -28,19 +28,32 @@ tm_wg_render() {
   local endpoint_host="$8"
   local endpoint_port="$9"
   local keepalive="${10}"
+  local family peer_family hostbits endpoint=""
   tm_valid_wg_key "$private_key" || return 1
   tm_valid_wg_key "$peer_key" || return 1
-  tm_ipv4_is_unicast_host "$local_ip" || return 1
-  tm_ipv4_is_unicast_host "$peer_tun" || return 1
-  tm_valid_tunnel_prefix "$cidr" || return 1
+  family=$(tm_ip_family "$local_ip") || return 1
+  peer_family=$(tm_ip_family "$peer_tun") || return 1
+  [[ "$family" == "$peer_family" ]] || return 1
+  tm_ip_is_assignable "$local_ip" "$cidr" || return 1
+  tm_ip_is_assignable "$peer_tun" "$cidr" || return 1
   tm_valid_port "$listen_port" || return 1
   tm_valid_mtu "$mtu" || return 1
   tm_valid_keepalive "$keepalive" || return 1
-  if [[ -n "$endpoint_host" ]]; then
-    tm_ipv4_is_unicast_host "$endpoint_host" || return 1
-    tm_valid_port "$endpoint_port" || return 1
+  if [[ "$family" == "4" ]]; then
+    hostbits=32
+  else
+    hostbits=128
   fi
-  if tm_default_route_cidr "${peer_tun}/32"; then
+  if [[ -n "$endpoint_host" ]]; then
+    tm_ip_is_unicast_host "$endpoint_host" || return 1
+    tm_valid_port "$endpoint_port" || return 1
+    if [[ "$(tm_ip_family "$endpoint_host")" == "6" ]]; then
+      endpoint="[${endpoint_host}]:${endpoint_port}"
+    else
+      endpoint="${endpoint_host}:${endpoint_port}"
+    fi
+  fi
+  if tm_default_route_cidr "${peer_tun}/${hostbits}"; then
     return 1
   fi
   printf '%s\n' "[Interface]"
@@ -52,9 +65,9 @@ tm_wg_render() {
   printf '\n'
   printf '%s\n' "[Peer]"
   printf 'PublicKey = %s\n' "$peer_key"
-  printf 'AllowedIPs = %s/32\n' "$peer_tun"
-  if [[ -n "$endpoint_host" ]]; then
-    printf 'Endpoint = %s:%s\n' "$endpoint_host" "$endpoint_port"
+  printf 'AllowedIPs = %s/%s\n' "$peer_tun" "$hostbits"
+  if [[ -n "$endpoint" ]]; then
+    printf 'Endpoint = %s\n' "$endpoint"
   fi
   if [[ "$keepalive" != "0" ]]; then
     printf 'PersistentKeepalive = %s\n' "$keepalive"
@@ -69,7 +82,7 @@ tm_wg_assert_conf_safe() {
   [[ "$text" == *"Table = off"* ]] || return 1
   [[ "$text" != *"0.0.0.0/0"* ]] || return 1
   [[ "$text" != *"::/0"* ]] || return 1
-  grep -q '^AllowedIPs = .*/32$' <<<"$text" || return 1
+  grep -Eq '^AllowedIPs = .*/(32|128)$' <<<"$text" || return 1
   return 0
 }
 
@@ -173,7 +186,7 @@ tm_wg_up_exec() {
   iface=$(tm_tunnel_iface "$name")
   conf=$(tm_wg_conf_file "$name")
   if ! tm_wg_assert_conf_safe "$conf"; then
-    tm_error "Refusing to start ${iface} without Table = off and a /32 AllowedIPs entry."
+    tm_error "Refusing to start ${iface} without Table = off and a /32 or /128 AllowedIPs entry."
     return 1
   fi
   if tm_use_systemd; then

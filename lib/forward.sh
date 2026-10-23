@@ -184,7 +184,7 @@ tm_forward_validate_common() {
     tm_error "Invalid destination port."
     return 1
   }
-  tm_ipv4_is_unicast_host "$dest_ip" || {
+  tm_ip_is_unicast_host "$dest_ip" || {
     tm_error "Invalid destination IP."
     return 1
   }
@@ -196,10 +196,20 @@ tm_forward_validate_common() {
     tm_error "Invalid ingress interface."
     return 1
   }
-  tm_ipv4_is_unicast_host "$source_ip" || {
+  tm_ip_is_unicast_host "$source_ip" || {
     tm_error "Invalid source IP. Pass --source-ip or --tunnel."
     return 1
   }
+  if [[ "$(tm_ip_family "$dest_ip")" != "$(tm_ip_family "$source_ip")" ]]; then
+    tm_error "Source and destination addresses must use the same IP family."
+    return 1
+  fi
+  if [[ "$proto" == "udp" ]]; then
+    if [[ "$(tm_ip_family "$dest_ip")" == "6" || "$(tm_ip_family "$listen_ip")" == "6" ]]; then
+      tm_error "UDP forwarding supports IPv4 only. TCP forwarding can use IPv6."
+      return 1
+    fi
+  fi
   tm_ssh_port >/dev/null
   if tm_port_is_protected "$listen_port"; then
     tm_error "Refusing to listen on protected port ${listen_port}. That would risk cutting off SSH."

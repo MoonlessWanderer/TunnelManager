@@ -497,9 +497,82 @@ tm_fw_udp_delete_exec() {
   esac
 }
 
+tm_ip6tables_input_ensure() {
+  if ! tm_run_quiet ip6tables -t filter -n -L TM_INPUT >/dev/null 2>&1; then
+    tm_must ip6tables -t filter -N TM_INPUT || return 1
+  fi
+  if tm_run_quiet ip6tables -t filter -C INPUT -m comment --comment tm:jump:filter-input -j TM_INPUT >/dev/null 2>&1; then
+    return 0
+  fi
+  tm_must ip6tables -t filter -I INPUT 1 -m comment --comment tm:jump:filter-input -j TM_INPUT
+}
+
+tm_ip6tables_chain_rules() {
+  if ! tm_run_quiet ip6tables -t filter -n -L TM_INPUT >/dev/null 2>&1; then
+    return 0
+  fi
+  tm_run_quiet ip6tables -t filter -S TM_INPUT
+}
+
+tm_ip6tables_input_delete_comment() {
+  local comment="$1"
+  local line prefix=""
+  local -a spec=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    [[ "$line" == *"--comment ${comment}"* || "$line" == *"--comment \"${comment}\""* ]] || continue
+    [[ "$line" == "-A TM_INPUT "* ]] || continue
+    prefix="-A TM_INPUT "
+    read -r -a spec <<<"${line#"${prefix}"}"
+    tm_must ip6tables -t filter -D TM_INPUT "${spec[@]}" || return 1
+  done < <(tm_ip6tables_chain_rules)
+}
+
+tm_ip6tables_input_gc() {
+  local line
+  tm_run_quiet ip6tables -t filter -n -L TM_INPUT >/dev/null 2>&1 || return 0
+  while IFS= read -r line; do
+    [[ "$line" == -A\ * ]] && return 0
+  done < <(tm_ip6tables_chain_rules)
+  tm_run_quiet ip6tables -t filter -D INPUT -m comment --comment tm:jump:filter-input -j TM_INPUT >/dev/null 2>&1 || true
+  tm_must ip6tables -t filter -X TM_INPUT
+}
+
+tm_ip6tables_input_apply_exec() {
+  local kind="$1"
+  local name="$2"
+  local iface="$3"
+  local port="${4:-}"
+  local comment
+  comment=$(tm_fw_comment "${kind}:${name}:input")
+  tm_ip6tables_input_ensure || return 1
+  if [[ "$kind" == "gre" ]]; then
+    tm_iptables_add_if_missing \
+      ip6tables -t filter -A TM_INPUT -i "$iface" -p gre \
+      -m comment --comment "$comment" -j ACCEPT
+  else
+    tm_iptables_add_if_missing \
+      ip6tables -t filter -A TM_INPUT -i "$iface" -p udp --dport "$port" \
+      -m conntrack --ctstate NEW,ESTABLISHED \
+      -m comment --comment "$comment" -j ACCEPT
+  fi
+}
+
+tm_ip6tables_input_delete_exec() {
+  local kind="$1"
+  local name="$2"
+  tm_ip6tables_input_delete_comment "$(tm_fw_comment "${kind}:${name}:input")" || return 1
+  tm_ip6tables_input_gc || return 1
+}
+
 tm_fw_input_apply_exec() {
-  local backend
+  local backend family
+  family="${5:-4}"
   backend=$(tm_fw_active_backend) || return 1
+  if [[ "$family" == "6" && "$backend" == "iptables" ]]; then
+    tm_ip6tables_input_apply_exec "$@"
+    return $?
+  fi
   case "$backend" in
     iptables) tm_iptables_input_apply_exec "$@" ;;
     nft) tm_nft_input_apply_exec "$@" ;;
@@ -510,8 +583,13 @@ tm_fw_input_apply_exec() {
 tm_fw_input_delete_exec() {
   local kind="$1"
   local name="$2"
+  local family="${3:-4}"
   local backend
   backend=$(tm_fw_active_backend) || return 1
+  if [[ "$family" == "6" && "$backend" == "iptables" ]]; then
+    tm_ip6tables_input_delete_exec "$kind" "$name"
+    return $?
+  fi
   case "$backend" in
     iptables) tm_iptables_input_delete_exec "$kind" "$name" ;;
     nft) tm_nft_input_delete_exec "$kind" "$name" ;;

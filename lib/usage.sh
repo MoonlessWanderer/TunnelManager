@@ -16,6 +16,7 @@ tm_usage() {
   cat <<EOF
 Tunnel Manager ${TM_VERSION}
 Manage a WireGuard or GRE tunnel and TCP/UDP forwards between two servers.
+Tunnel addresses and endpoints may be IPv4 or IPv6. UDP forwarding is IPv4 only.
 
 Safety:
   The default route is never changed.
@@ -26,6 +27,7 @@ Safety:
   SSH listen ports are refused as forward listen ports.
 
 Usage:
+  tm
   tunnel-manager
   tunnel-manager help
   tunnel-manager version
@@ -60,6 +62,9 @@ Usage:
   tunnel-manager backup restore --file FILE [--include-keys] [--dry-run] [--yes]
   tunnel-manager backup list
   tunnel-manager service enable|disable|status [--yes]
+  tunnel-manager update [--dry-run] [--yes]
+
+tm opens the menu. tunnel-manager with no arguments does the same on a terminal.
 
 Global flags:
   --yes       Apply without an extra confirmation prompt.

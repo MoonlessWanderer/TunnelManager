@@ -45,10 +45,10 @@ tm_ipv4_is_unicast_host() {
 
 tm_valid_listen_ip() {
   local ip="$1"
-  if [[ "$ip" == "0.0.0.0" ]]; then
+  if [[ "$ip" == "0.0.0.0" || "$ip" == "::" ]]; then
     return 0
   fi
-  tm_ipv4_is_unicast_host "$ip"
+  tm_ip_is_unicast_host "$ip"
 }
 
 tm_valid_port() {
@@ -225,14 +225,217 @@ tm_ipv4_is_assignable() {
   [[ "$ip" != "$network" && "$ip" != "$broadcast" ]]
 }
 
+tm_ipv6_append_groups() {
+  local -n _tm_v6=$1
+  shift
+  local group padded
+  for group in "$@"; do
+    [[ "$group" =~ ^[0-9a-f]{1,4}$ ]] || return 1
+    printf -v padded '%04x' "$((16#$group))"
+    _tm_v6+=("$padded")
+  done
+}
+
+tm_ipv6_expand() {
+  local ip="${1,,}"
+  local left="" right="" missing=0 i
+  local -a left_groups=() right_groups=() words=()
+  [[ -n "$ip" ]] || return 1
+  [[ "$ip" =~ ^[0-9a-f:]+$ ]] || return 1
+  [[ "$ip" != *:::* ]] || return 1
+  [[ "$ip" != *::*::* ]] || return 1
+  if [[ "$ip" == *::* ]]; then
+    left=${ip%%::*}
+    right=${ip#*::}
+    if [[ -n "$left" ]]; then
+      [[ "$left" != *: && "$left" != :* ]] || return 1
+      IFS=':' read -r -a left_groups <<<"$left"
+    fi
+    if [[ -n "$right" ]]; then
+      [[ "$right" != *: && "$right" != :* ]] || return 1
+      IFS=':' read -r -a right_groups <<<"$right"
+    fi
+    missing=$((8 - ${#left_groups[@]} - ${#right_groups[@]}))
+    ((missing >= 1)) || return 1
+  else
+    [[ "$ip" != *: && "$ip" != :* ]] || return 1
+    IFS=':' read -r -a left_groups <<<"$ip"
+    [[ "${#left_groups[@]}" -eq 8 ]] || return 1
+  fi
+  if ((${#left_groups[@]} > 0)); then
+    tm_ipv6_append_groups words "${left_groups[@]}" || return 1
+  fi
+  for ((i = 0; i < missing; i++)); do
+    words+=(0000)
+  done
+  if ((${#right_groups[@]} > 0)); then
+    tm_ipv6_append_groups words "${right_groups[@]}" || return 1
+  fi
+  [[ "${#words[@]}" -eq 8 ]] || return 1
+  printf '%s\n' "${words[*]}"
+}
+
+tm_valid_ipv6() {
+  tm_ipv6_expand "$1" >/dev/null
+}
+
+tm_ip_family() {
+  if tm_valid_ipv4 "$1"; then
+    printf '4\n'
+    return 0
+  fi
+  if tm_valid_ipv6 "$1"; then
+    printf '6\n'
+    return 0
+  fi
+  return 1
+}
+
+tm_ip_canonical() {
+  local family
+  family=$(tm_ip_family "$1") || return 1
+  if [[ "$family" == "4" ]]; then
+    printf '%s\n' "$1"
+    return 0
+  fi
+  tm_ipv6_expand "$1" | tr ' ' ':'
+}
+
+tm_ipv6_is_unicast_host() {
+  local expanded first num
+  expanded=$(tm_ipv6_expand "$1") || return 1
+  [[ "$expanded" != "0000 0000 0000 0000 0000 0000 0000 0000" ]] || return 1
+  [[ "$expanded" != "0000 0000 0000 0000 0000 0000 0000 0001" ]] || return 1
+  [[ "$expanded" != "0000 0000 0000 0000 0000 ffff "* ]] || return 1
+  first=${expanded%% *}
+  num=$((16#$first))
+  if ((num >= 0xfe80 && num <= 0xfeff)); then
+    return 1
+  fi
+  if ((num >= 0xff00)); then
+    return 1
+  fi
+  return 0
+}
+
+tm_ip_is_unicast_host() {
+  tm_ipv4_is_unicast_host "$1" && return 0
+  tm_ipv6_is_unicast_host "$1"
+}
+
+tm_valid_ipv6_prefix() {
+  local p="$1"
+  [[ "$p" =~ ^[0-9]+$ ]] || return 1
+  [[ "$p" =~ ^0[0-9]+$ ]] && return 1
+  # Wider than /64 would install a connected route that can shadow real networks.
+  ((p >= 64 && p <= 127)) || return 1
+  return 0
+}
+
+tm_valid_prefix_for_family() {
+  case "$1" in
+    4) tm_valid_tunnel_prefix "$2" ;;
+    6) tm_valid_ipv6_prefix "$2" ;;
+    *) return 1 ;;
+  esac
+}
+
+tm_ipv6_network() {
+  local ip="$1"
+  local prefix="$2"
+  local expanded i hextet result b global_bit bit_val out_bit padded
+  local -a src=() masked=()
+  expanded=$(tm_ipv6_expand "$ip") || return 1
+  read -r -a src <<<"$expanded"
+  for i in 0 1 2 3 4 5 6 7; do
+    hextet=$((16#${src[i]}))
+    result=0
+    for b in 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0; do
+      global_bit=$((i * 16 + (15 - b)))
+      bit_val=$(((hextet >> b) & 1))
+      if ((global_bit >= prefix)); then
+        out_bit=0
+      else
+        out_bit=$bit_val
+      fi
+      result=$((result | (out_bit << b)))
+    done
+    printf -v padded '%04x' "$result"
+    masked+=("$padded")
+  done
+  printf '%s\n' "${masked[*]}"
+}
+
+tm_ipv6_same_subnet() {
+  local left="$1"
+  local right="$2"
+  local prefix="$3"
+  local left_net right_net
+  tm_valid_ipv6 "$left" || return 1
+  tm_valid_ipv6 "$right" || return 1
+  tm_valid_ipv6_prefix "$prefix" || return 1
+  left_net=$(tm_ipv6_network "$left" "$prefix")
+  right_net=$(tm_ipv6_network "$right" "$prefix")
+  [[ "$left_net" == "$right_net" ]]
+}
+
+tm_ipv6_is_assignable() {
+  local ip="$1"
+  local prefix="$2"
+  local expanded network
+  tm_ipv6_is_unicast_host "$ip" || return 1
+  tm_valid_ipv6_prefix "$prefix" || return 1
+  if ((prefix >= 127)); then
+    return 0
+  fi
+  expanded=$(tm_ipv6_expand "$ip") || return 1
+  network=$(tm_ipv6_network "$ip" "$prefix") || return 1
+  [[ "$expanded" != "$network" ]]
+}
+
+tm_ip_is_assignable() {
+  local family
+  family=$(tm_ip_family "$1") || return 1
+  if [[ "$family" == "4" ]]; then
+    tm_ipv4_is_assignable "$1" "$2"
+  else
+    tm_ipv6_is_assignable "$1" "$2"
+  fi
+}
+
+tm_ip_same_subnet() {
+  local family
+  family=$(tm_ip_family "$1") || return 1
+  if [[ "$family" == "4" ]]; then
+    tm_ipv4_same_subnet "$1" "$2" "$3"
+  else
+    tm_ipv6_same_subnet "$1" "$2" "$3"
+  fi
+}
+
+tm_public_pair_ok() {
+  local left_family right_family
+  left_family=$(tm_ip_family "$1") || return 1
+  right_family=$(tm_ip_family "$2") || return 1
+  [[ "$left_family" == "$right_family" ]] || return 1
+  tm_ip_is_unicast_host "$1" || return 1
+  tm_ip_is_unicast_host "$2" || return 1
+  [[ "$(tm_ip_canonical "$1")" != "$(tm_ip_canonical "$2")" ]] || return 1
+  return 0
+}
+
 tm_tunnel_pair_ok() {
   local local_ip="$1"
   local remote_ip="$2"
   local prefix="$3"
-  [[ "$local_ip" != "$remote_ip" ]] || return 1
-  tm_ipv4_is_assignable "$local_ip" "$prefix" || return 1
-  tm_ipv4_is_assignable "$remote_ip" "$prefix" || return 1
-  tm_ipv4_same_subnet "$local_ip" "$remote_ip" "$prefix" || return 1
+  local left_family right_family
+  left_family=$(tm_ip_family "$local_ip") || return 1
+  right_family=$(tm_ip_family "$remote_ip") || return 1
+  [[ "$left_family" == "$right_family" ]] || return 1
+  [[ "$(tm_ip_canonical "$local_ip")" != "$(tm_ip_canonical "$remote_ip")" ]] || return 1
+  tm_ip_is_assignable "$local_ip" "$prefix" || return 1
+  tm_ip_is_assignable "$remote_ip" "$prefix" || return 1
+  tm_ip_same_subnet "$local_ip" "$remote_ip" "$prefix" || return 1
   return 0
 }
 

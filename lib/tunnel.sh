@@ -44,15 +44,46 @@ tm_export_dest_ok() {
 
 tm_tunnel_fill_defaults() {
   local -n _tm_fill=$1
+  local outer=4 inner=4
+  if tm_valid_ipv6 "${_tm_fill[local_public_ip]:-}"; then
+    outer=6
+  fi
+  if tm_valid_ipv6 "${_tm_fill[local_tunnel_ip]:-}"; then
+    inner=6
+  fi
   if [[ "${_tm_fill[type]}" == "wireguard" ]]; then
     [[ -n "${_tm_fill[listen_port]:-}" ]] || _tm_fill[listen_port]=51820
     [[ -n "${_tm_fill[endpoint_port]:-}" ]] || _tm_fill[endpoint_port]="${_tm_fill[listen_port]}"
-    [[ -n "${_tm_fill[mtu]:-}" ]] || _tm_fill[mtu]=1420
+    if [[ -z "${_tm_fill[mtu]:-}" ]]; then
+      if [[ "$outer" == "6" ]]; then
+        _tm_fill[mtu]=1400
+      else
+        _tm_fill[mtu]=1420
+      fi
+    fi
     [[ -n "${_tm_fill[keepalive]:-}" ]] || _tm_fill[keepalive]=25
-    [[ -n "${_tm_fill[cidr]:-}" ]] || _tm_fill[cidr]=30
+    if [[ -z "${_tm_fill[cidr]:-}" ]]; then
+      if [[ "$inner" == "6" ]]; then
+        _tm_fill[cidr]=64
+      else
+        _tm_fill[cidr]=30
+      fi
+    fi
   else
-    [[ -n "${_tm_fill[mtu]:-}" ]] || _tm_fill[mtu]=1476
-    [[ -n "${_tm_fill[cidr]:-}" ]] || _tm_fill[cidr]=30
+    if [[ -z "${_tm_fill[mtu]:-}" ]]; then
+      if [[ "$outer" == "6" ]]; then
+        _tm_fill[mtu]=1456
+      else
+        _tm_fill[mtu]=1476
+      fi
+    fi
+    if [[ -z "${_tm_fill[cidr]:-}" ]]; then
+      if [[ "$inner" == "6" ]]; then
+        _tm_fill[cidr]=64
+      else
+        _tm_fill[cidr]=30
+      fi
+    fi
     _tm_fill[listen_port]="${_tm_fill[listen_port]:-1}"
     _tm_fill[endpoint_port]="${_tm_fill[endpoint_port]:-1}"
     _tm_fill[keepalive]="${_tm_fill[keepalive]:-0}"
@@ -69,16 +100,8 @@ tm_tunnel_validate_request() {
     tm_error "Tunnel type must be wireguard or gre."
     return 1
   }
-  tm_ipv4_is_unicast_host "${_tm_req[local_public_ip]}" || {
-    tm_error "Invalid local public IP."
-    return 1
-  }
-  tm_ipv4_is_unicast_host "${_tm_req[remote_public_ip]}" || {
-    tm_error "Invalid remote public IP."
-    return 1
-  }
-  [[ "${_tm_req[local_public_ip]}" != "${_tm_req[remote_public_ip]}" ]] || {
-    tm_error "Local and remote public addresses must be different."
+  tm_public_pair_ok "${_tm_req[local_public_ip]}" "${_tm_req[remote_public_ip]}" || {
+    tm_error "Local and remote public addresses must be different IPv4 or IPv6 hosts of the same family."
     return 1
   }
   tm_valid_iface "${_tm_req[wan_iface]}" || {
@@ -87,7 +110,7 @@ tm_tunnel_validate_request() {
   }
   tm_tunnel_fill_defaults _tm_req
   tm_tunnel_pair_ok "${_tm_req[local_tunnel_ip]}" "${_tm_req[remote_tunnel_ip]}" "${_tm_req[cidr]}" || {
-    tm_error "Tunnel addresses must be different assignable hosts inside the same prefix (24-31)."
+    tm_error "Tunnel addresses must be different hosts in the same prefix. IPv4 uses 24-31. IPv6 uses 64-127."
     return 1
   }
   tm_valid_mtu "${_tm_req[mtu]}" || {
@@ -102,8 +125,12 @@ tm_tunnel_validate_request() {
       tm_error "The peer public key is not a WireGuard key."
       return 1
     fi
-    if (( _tm_req[mtu] > 1420 )); then
-      tm_warn "WireGuard MTU ${_tm_req[mtu]} is above 1420 and may fragment on common paths."
+    local mtu_limit=1420
+    if [[ "$(tm_ip_family "${_tm_req[local_public_ip]}")" == "6" ]]; then
+      mtu_limit=1400
+    fi
+    if (( _tm_req[mtu] > mtu_limit )); then
+      tm_warn "WireGuard MTU ${_tm_req[mtu]} is above ${mtu_limit} and may fragment on this path."
     fi
   fi
   return 0
@@ -165,9 +192,10 @@ tm_tunnel_state_undo() {
 tm_tunnel_start_exec() {
   local name="$1"
   local -A row=()
-  local iface
+  local iface family
   tm_tunnel_load "$name" row || return 1
   iface=$(tm_tunnel_iface "$name")
+  family=$(tm_ip_family "${row[TM_LOCAL_PUBLIC_IP]}") || return 1
   if [[ "${row[TM_TUNNEL_STATE]}" == "pending-peer" ]]; then
     tm_info "Tunnel ${name} is waiting for a peer public key, so it will not start."
     return 0
@@ -183,7 +211,7 @@ tm_tunnel_start_exec() {
       tm_wg_up_exec "$name" || return 1
     fi
     tm_rp_filter_apply_exec "$iface" || return 1
-    tm_fw_input_apply_exec wg "$name" "${row[TM_WAN_IFACE]}" "${row[TM_LISTEN_PORT]}" || return 1
+    tm_fw_input_apply_exec wg "$name" "${row[TM_WAN_IFACE]}" "${row[TM_LISTEN_PORT]}" "$family" || return 1
     return 0
   fi
   if [[ "${row[TM_GRE_ACK]}" != "yes" ]]; then
@@ -193,24 +221,25 @@ tm_tunnel_start_exec() {
   tm_gre_up_exec "$name" "${row[TM_LOCAL_PUBLIC_IP]}" "${row[TM_REMOTE_PUBLIC_IP]}" \
     "${row[TM_LOCAL_TUNNEL_IP]}" "${row[TM_TUNNEL_CIDR]}" "${row[TM_MTU]}" || return 1
   tm_rp_filter_apply_exec "$iface" || return 1
-  tm_fw_input_apply_exec gre "$name" "${row[TM_WAN_IFACE]}" || return 1
+  tm_fw_input_apply_exec gre "$name" "${row[TM_WAN_IFACE]}" "" "$family" || return 1
 }
 
 tm_tunnel_stop_exec() {
   local name="$1"
   local -A row=()
-  local iface
+  local iface family
   tm_tunnel_load "$name" row || return 1
   iface=$(tm_tunnel_iface "$name")
+  family=$(tm_ip_family "${row[TM_LOCAL_PUBLIC_IP]}") || return 1
   if tm_iface_exists "$iface"; then
     tm_rp_filter_restore_exec "$iface" || return 1
   fi
   if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]]; then
-    tm_fw_input_delete_exec wg "$name" || return 1
+    tm_fw_input_delete_exec wg "$name" "$family" || return 1
     tm_wg_down_exec "$name" || return 1
     return 0
   fi
-  tm_fw_input_delete_exec gre "$name" || return 1
+  tm_fw_input_delete_exec gre "$name" "$family" || return 1
   tm_gre_down_exec "$name" || return 1
 }
 
@@ -283,7 +312,11 @@ tm_action_tunnel_create() {
       "${req[listen_port]}" "${req[endpoint_port]}" "${req[mtu]}" "${req[keepalive]}" \
       "${req[wan_iface]}" "$peer" "$gre_ack"
   if [[ "$state" == "active" ]]; then
-    tm_plan_add "Start ${req[type]} tunnel ${req[name]} on $(tm_tunnel_iface "${req[name]}")" \
+    local link_kind="${req[type]}"
+    if [[ "$link_kind" == "gre" && "$(tm_ip_family "${req[local_public_ip]}")" == "6" ]]; then
+      link_kind="ip6gre"
+    fi
+    tm_plan_add "Start ${link_kind} tunnel ${req[name]} on $(tm_tunnel_iface "${req[name]}")" \
       "$(tm_shell_quote tm_tunnel_stop_exec "${req[name]}")" \
       tm_tunnel_start_exec "${req[name]}"
   else
@@ -627,7 +660,11 @@ tm_action_tunnel_test() {
     fi
   fi
   if tm_cmd_available ping; then
-    if tm_run ping -c 3 -W 2 "${row[TM_REMOTE_TUNNEL_IP]}" >/dev/null 2>&1; then
+    local -a ping_args=(ping -c 3 -W 2)
+    if [[ "$(tm_ip_family "${row[TM_REMOTE_TUNNEL_IP]}")" == "6" ]]; then
+      ping_args=(ping -6 -c 3 -W 2)
+    fi
+    if tm_run "${ping_args[@]}" "${row[TM_REMOTE_TUNNEL_IP]}" >/dev/null 2>&1; then
       tm_info "[PASS] ${row[TM_REMOTE_TUNNEL_IP]} answered ping."
     else
       tm_error "[FAIL] ${row[TM_REMOTE_TUNNEL_IP]} did not answer ping."

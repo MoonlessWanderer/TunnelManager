@@ -15,7 +15,8 @@ administer, and review every plan before confirming it.
 - Source state files.
 - Follow a symlink when reading or writing state.
 - Write outside its state, log, run, sysctl, and `tm-*.conf` paths.
-- Mix iptables and nftables in one apply.
+- Mix iptables and nftables in one apply. `ip6tables` is used only as the
+  IPv6 companion of the iptables backend, for an IPv6 tunnel endpoint.
 - Reload HAProxy without a successful `haproxy -c`.
 - Start GRE without an explicit no-encryption acknowledgement.
 - Include private keys in a backup unless `--include-keys` is set.

@@ -103,6 +103,7 @@ tm_test_reset() {
   export TM_LOG_FILE="${TM_LOG_DIR}/tunnel-manager.log"
   mkdir -p -- "$TM_FAKE_ROOT" "$TM_LOG_DIR"
   TM_BIN_OVERRIDE[iptables]="${TM_REPO}/tests/fakes/iptables"
+  TM_BIN_OVERRIDE[ip6tables]="${TM_REPO}/tests/fakes/ip6tables"
   TM_BIN_OVERRIDE[nft]="${TM_REPO}/tests/fakes/nft"
   TM_BIN_OVERRIDE[ip]="${TM_REPO}/tests/fakes/ip"
   TM_BIN_OVERRIDE[sysctl]="${TM_REPO}/tests/fakes/sysctl"

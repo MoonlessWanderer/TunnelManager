@@ -20,6 +20,15 @@ tm_haproxy_ident() {
   printf 'tm_%s\n' "$name"
 }
 
+tm_haproxy_addr() {
+  local ip="$1"
+  if tm_valid_ipv6 "$ip"; then
+    printf '[%s]' "$ip"
+    return 0
+  fi
+  printf '%s' "$ip"
+}
+
 tm_haproxy_render() {
   local -a names=("$@")
   local name ident listen_ip listen_port dest_ip dest_port source_ip
@@ -59,7 +68,7 @@ tm_haproxy_render() {
     ident=$(tm_haproxy_ident "$name")
     printf '\n'
     printf 'frontend %s_fe\n' "$ident"
-    printf '    bind %s:%s\n' "$listen_ip" "$listen_port"
+    printf '    bind %s:%s\n' "$(tm_haproxy_addr "$listen_ip")" "$listen_port"
     printf '%s\n' "    mode tcp"
     printf '    default_backend %s_be\n' "$ident"
     printf '\n'
@@ -68,9 +77,10 @@ tm_haproxy_render() {
     printf '%s\n' "    option tcp-check"
     if [[ -n "$source_ip" ]]; then
       printf '    server dest %s:%s source %s check inter 5s fall 3 rise 2\n' \
-        "$dest_ip" "$dest_port" "$source_ip"
+        "$(tm_haproxy_addr "$dest_ip")" "$dest_port" "$(tm_haproxy_addr "$source_ip")"
     else
-      printf '    server dest %s:%s check inter 5s fall 3 rise 2\n' "$dest_ip" "$dest_port"
+      printf '    server dest %s:%s check inter 5s fall 3 rise 2\n' \
+        "$(tm_haproxy_addr "$dest_ip")" "$dest_port"
     fi
   done
 }

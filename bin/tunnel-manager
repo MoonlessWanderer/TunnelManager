@@ -34,6 +34,11 @@ tm_resolve_lib_dir() {
 }
 
 TM_LIB_DIR=$(tm_resolve_lib_dir)
+if [[ "$TM_LIB_DIR" == */lib/tunnel-manager ]]; then
+  TM_PREFIX=$(cd -P "${TM_LIB_DIR}/../.." && pwd)
+  export TM_PREFIX
+fi
+export TM_LIB_DIR
 # shellcheck source=../lib/load.sh
 source "${TM_LIB_DIR}/load.sh"
 tm_main "$@"

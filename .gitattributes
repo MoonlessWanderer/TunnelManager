@@ -1,3 +1,4 @@
 * text=auto eol=lf
 *.sh text eol=lf
 bin/tunnel-manager text eol=lf
+bin/tm text eol=lf

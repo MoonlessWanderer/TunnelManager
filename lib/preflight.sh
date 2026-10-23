@@ -259,7 +259,10 @@ tm_iptables_argv_is_safe() {
   local table="filter"
   local action="" chain="" position="" token
 
-  [[ "${args[0]}" == "iptables" ]] || return 1
+  case "${args[0]}" in
+    iptables|ip6tables) ;;
+    *) return 1 ;;
+  esac
   tm_iptables_has_forbidden_arg "$@" && return 1
 
   while [[ "$idx" -lt "$n" ]]; do
@@ -570,24 +573,35 @@ tm_nft_argv_is_safe() {
 
 tm_ip_prefix_ok() {
   local cidr="$1"
-  local prefix
-  [[ "$cidr" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]] || return 1
+  local ip prefix family
+  [[ "$cidr" == */* ]] || return 1
+  ip=${cidr%/*}
   prefix=${cidr#*/}
-  tm_ipv4_is_unicast_host "${cidr%%/*}" || return 1
-  tm_valid_tunnel_prefix "$prefix" || return 1
+  [[ "$ip" != */* && "$prefix" != */* ]] || return 1
+  family=$(tm_ip_family "$ip") || return 1
+  tm_ip_is_assignable "$ip" "$prefix" || return 1
+  tm_valid_prefix_for_family "$family" "$prefix" || return 1
   return 0
 }
 
 tm_ip_link_add_is_safe() {
   local -a args=("$@")
-  # name IFACE type gre local IP remote IP ttl N
+  local family
+  # name IFACE type gre|ip6gre local IP remote IP ttl N
   [[ "${#args[@]}" -eq 10 ]] || return 1
-  [[ "${args[0]}" == "name" && "${args[2]}" == "type" && "${args[3]}" == "gre" ]] || return 1
+  [[ "${args[0]}" == "name" && "${args[2]}" == "type" ]] || return 1
   tm_valid_tunnel_iface "${args[1]}" || return 1
   [[ "${args[4]}" == "local" && "${args[6]}" == "remote" && "${args[8]}" == "ttl" ]] || return 1
-  tm_ipv4_is_unicast_host "${args[5]}" || return 1
-  tm_ipv4_is_unicast_host "${args[7]}" || return 1
-  [[ "${args[5]}" != "${args[7]}" ]] || return 1
+  case "${args[3]}" in
+    gre) family=4 ;;
+    ip6gre) family=6 ;;
+    *) return 1 ;;
+  esac
+  [[ "$(tm_ip_family "${args[5]}")" == "$family" ]] || return 1
+  [[ "$(tm_ip_family "${args[7]}")" == "$family" ]] || return 1
+  tm_ip_is_unicast_host "${args[5]}" || return 1
+  tm_ip_is_unicast_host "${args[7]}" || return 1
+  [[ "$(tm_ip_canonical "${args[5]}")" != "$(tm_ip_canonical "${args[7]}")" ]] || return 1
   [[ "${args[9]}" =~ ^[0-9]+$ ]] || return 1
   (("${args[9]}" >= 1 && "${args[9]}" <= 255)) || return 1
   return 0
@@ -787,7 +801,7 @@ tm_modprobe_argv_is_safe() {
   [[ "$1" == "modprobe" ]] || return 1
   [[ "$#" -eq 2 ]] || return 1
   case "$2" in
-    ip_gre|wireguard) return 0 ;;
+    ip_gre|ip6_gre|wireguard) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -881,12 +895,12 @@ tm_ping_argv_is_safe() {
         iface="${args[$i]:-}"
         tm_valid_iface "$iface" || return 1
         ;;
-      -4|-n|-q)
+      -4|-6|-n|-q)
         ;;
       *)
         [[ -z "$dest" ]] || return 1
         dest="${args[$i]}"
-        tm_ipv4_is_unicast_host "$dest" || return 1
+        tm_ip_is_unicast_host "$dest" || return 1
         ;;
     esac
     i=$((i + 1))
@@ -944,6 +958,36 @@ tm_timeout_argv_is_safe() {
   tm_argv_is_safe "${args[@]:$i}"
 }
 
+tm_managed_update_path() {
+  local path
+  path=$(tm_normalize_path "$1") || return 1
+  tm_path_under "$path" "${TM_VAR}/update" || return 1
+  return 0
+}
+
+tm_curl_argv_is_safe() {
+  local dest url
+  [[ "$#" -eq 8 ]] || return 1
+  dest="$7"
+  url="$8"
+  [[ "$1" == "curl" && "$2" == "-fsSL" && "$3" == "--proto" && "$4" == "=https" ]] || return 1
+  [[ "$5" == "--tlsv1.2" && "$6" == "-o" ]] || return 1
+  tm_managed_update_path "$dest" || return 1
+  [[ "$url" == "https://github.com/MoonlessWanderer/TunnelManager/archive/refs/heads/main.tar.gz" ]] || return 1
+  return 0
+}
+
+tm_tar_argv_is_safe() {
+  if [[ "$1" == "tar" && "$2" == "-tzf" && "$#" -eq 3 ]]; then
+    tm_managed_update_path "$3"
+    return $?
+  fi
+  [[ "$1" == "tar" && "$2" == "-xzf" && "$4" == "-C" && "$#" -eq 5 ]] || return 1
+  tm_managed_update_path "$3" || return 1
+  tm_managed_update_path "$5" || return 1
+  return 0
+}
+
 tm_argv_is_safe() {
   if [[ "$#" -eq 0 ]]; then
     return 1
@@ -952,8 +996,14 @@ tm_argv_is_safe() {
     tm_*)
       [[ "$1" =~ ^tm_[A-Za-z0-9_]+$ ]]
       ;;
-    iptables)
+    iptables|ip6tables)
       tm_iptables_argv_is_safe "$@"
+      ;;
+    curl)
+      tm_curl_argv_is_safe "$@"
+      ;;
+    tar)
+      tm_tar_argv_is_safe "$@"
       ;;
     nft)
       tm_nft_argv_is_safe "$@"

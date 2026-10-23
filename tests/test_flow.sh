@@ -109,6 +109,39 @@ else
   tm_fail "GRE dry-run wrote state"
 fi
 
+tm_expect_ok "create ipv6 wireguard tunnel" \
+  tm_action_tunnel_create --name edge6 --type wireguard \
+  --local-public-ip 2001:db8::10 --remote-public-ip 2001:db8::20 \
+  --local-tunnel-ip 2001:db8:1::1 --remote-tunnel-ip 2001:db8:1::2 \
+  --wan-iface eth0 --peer-public-key "$TM_TEST_PUB" --yes
+conf6="${TM_WG_DIR}/tm-edge6.conf"
+if grep -q 'AllowedIPs = 2001:db8:1::2/128' "$conf6" \
+  && grep -q 'Endpoint = \[2001:db8::20\]:51820' "$conf6" \
+  && grep -q 'Table = off' "$conf6" \
+  && ! grep -q '::/0' "$conf6"; then
+  tm_pass "ipv6 wireguard config is a host route"
+else
+  tm_fail "ipv6 wireguard config was not constrained"
+fi
+if [[ -f "${TM_FAKE_ROOT}/ip6tables.log" ]] && grep -q -- '--dport 51820' "${TM_FAKE_ROOT}/ip6tables.log" \
+  && ! grep -q -- '-F' "${TM_FAKE_ROOT}/ip6tables.log"; then
+  tm_pass "ipv6 endpoint is allowed through ip6tables"
+else
+  tm_fail "ipv6 endpoint did not install an ip6tables input rule"
+fi
+tm_expect_fail "udp ipv6 forward is rejected" \
+  tm_action_forward_add --name v6dns --proto udp --listen-port 5301 \
+  --dest-ip 2001:db8:1::2 --source-ip 2001:db8:1::1 --ingress-iface eth0 --yes
+text6=$(TM_DRY_RUN=1 tm_action_tunnel_create --name gre6 --type gre \
+  --local-public-ip 2001:db8::11 --remote-public-ip 2001:db8::21 \
+  --local-tunnel-ip 2001:db8:3::1 --remote-tunnel-ip 2001:db8:3::2 \
+  --wan-iface eth0 --dry-run 2>&1 || true)
+if [[ "$text6" == *"ip6gre"* && "$text6" == *"no encryption"* && ! -f "${TM_ETC}/tunnels/gre6.conf" ]]; then
+  tm_pass "ipv6 GRE dry-run names ip6gre and does not write state"
+else
+  tm_fail "ipv6 GRE dry-run was incomplete"
+fi
+
 printf '%s\n' "frontend tm_boom_fe" >"${TM_FAKE_ROOT}/haproxy.reject-if"
 status=0
 tm_action_forward_add --name boom --proto tcp --listen-port 8443 \

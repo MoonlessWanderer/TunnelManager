@@ -122,7 +122,7 @@ tm_action_init() {
   ssh_port=$(tm_opt_get opt ssh_port "22")
   backend=$(tm_opt_get opt fw_backend "auto")
   tm_valid_role "$role" || tm_die "Role must be iran or foreign."
-  tm_ipv4_is_unicast_host "$public_ip" || tm_die "A reachable public IPv4 address is required."
+  tm_ip_is_unicast_host "$public_ip" || tm_die "A reachable public IPv4 or IPv6 address is required."
   tm_valid_iface "$wan" || tm_die "A WAN interface name is required."
   tm_valid_port "$ssh_port" || tm_die "Invalid SSH port."
   tm_valid_fw_backend "$backend" || tm_die "Firewall backend must be auto, iptables, or nft."

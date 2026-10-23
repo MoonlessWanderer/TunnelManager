@@ -26,6 +26,22 @@ tm_expect_ok "wireguard name edge" tm_valid_tunnel_name edge
 tm_expect_fail "reserved name default" tm_valid_tunnel_name default
 tm_expect_ok "default route cidr is recognized" tm_default_route_cidr 0.0.0.0/0
 tm_expect_fail "/32 is not a default route" tm_default_route_cidr 10.200.0.2/32
+tm_expect_ok "compressed ipv6 is valid" tm_valid_ipv6 2001:db8::1
+tm_expect_ok "ipv6 host is unicast" tm_ipv6_is_unicast_host 2001:db8::1
+tm_expect_fail "ipv6 loopback is not a tunnel address" tm_ipv6_is_unicast_host ::1
+tm_expect_fail "ipv6 unspecified is not a host" tm_ipv6_is_unicast_host ::
+tm_expect_ok "ipv6 unspecified may be a listen address" tm_valid_listen_ip ::
+tm_expect_fail "ipv6 link-local is rejected" tm_ipv6_is_unicast_host fe80::1
+tm_expect_fail "ipv6 multicast is rejected" tm_ipv6_is_unicast_host ff02::1
+tm_expect_ok "ipv6 /64 peers share a subnet" tm_ipv6_same_subnet 2001:db8:1::1 2001:db8:1::2 64
+tm_expect_fail "ipv6 /64 does not contain a different subnet id" tm_ipv6_same_subnet 2001:db8:1::1 2001:db8:2::1 64
+tm_expect_fail "ipv6 subnet-router anycast is not assignable" tm_ipv6_is_assignable 2001:db8:1:: 64
+tm_expect_ok "both ipv6 /127 hosts are assignable" tm_tunnel_pair_ok 2001:db8:1:: 2001:db8:1::1 127
+tm_expect_fail "ipv6 /48 is too wide for a tunnel" tm_valid_ipv6_prefix 48
+tm_expect_fail "mixed tunnel families are rejected" tm_tunnel_pair_ok 10.200.0.1 2001:db8:1::1 64
+tm_expect_fail "mixed public families are rejected" tm_public_pair_ok 203.0.113.10 2001:db8::20
+tm_expect_ok "ipv6 public pair is accepted" tm_public_pair_ok 2001:db8::10 2001:db8::20
+tm_expect_ok "default ipv6 route is recognized" tm_default_route_cidr ::/0
 
 if [[ ${#TM_TEST_PRIV} -eq 44 && ${#TM_TEST_PUB} -eq 44 ]]; then
   tm_pass "generated wireguard keys are 44 characters"

@@ -13,7 +13,7 @@ if [[ -n "${TM_COMMON_LOADED:-}" ]]; then
 fi
 TM_COMMON_LOADED=1
 
-TM_VERSION="1.0.0"
+TM_VERSION="1.1.0"
 
 tm_version() {
   printf '%s\n' "$TM_VERSION"
@@ -191,7 +191,7 @@ tm_exec() {
   local bin=""
   if [[ "${TM_TEST_MODE:-0}" == "1" ]]; then
     case "$name" in
-      iptables|nft|ip|sysctl|wg|wg-quick|systemctl|modprobe|haproxy|ping|ss)
+      iptables|ip6tables|nft|ip|sysctl|wg|wg-quick|systemctl|modprobe|haproxy|ping|ss)
         if [[ -z "${TM_BIN_OVERRIDE[$name]:-}" ]]; then
           tm_error "Test mode refuses to run the real ${name} command."
           return 127

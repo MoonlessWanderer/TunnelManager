@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Separate state from the IPv4 iptables fake. The rule engine is shared.
+export TM_FAKE_TABLE_TAG=ip6tables
+root=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exec bash "${root}/iptables" "$@"
