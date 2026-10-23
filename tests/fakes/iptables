@@ -120,15 +120,25 @@ case "$action" in
     fi
     spec="${args[*]:$spec_start}"
     if [[ "$action" == "-C" || "$action" == "--check" || "$action" == "-D" || "$action" == "--delete" ]]; then
-      line_match="RULE	${table}	${chain}	${spec}"
-      if grep -F -q -x "$line_match" "$STATE"; then
-        if [[ "$action" == "-D" || "$action" == "--delete" ]]; then
-          grep -F -v -x "$line_match" "$STATE" >"${STATE}.tmp" || true
-          mv -f "${STATE}.tmp" "$STATE"
+      want="${spec//\"/}"
+      matched=""
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" == RULE$'\t'"${table}"$'\t'"${chain}"$'\t'* ]] || continue
+        have="${line#RULE$'\t'"${table}"$'\t'"${chain}"$'\t'}"
+        have="${have//\"/}"
+        if [[ "$have" == "$want" ]]; then
+          matched="$line"
+          break
         fi
-        exit 0
+      done <"$STATE"
+      if [[ -z "$matched" ]]; then
+        exit 1
       fi
-      exit 1
+      if [[ "$action" == "-D" || "$action" == "--delete" ]]; then
+        grep -F -v -x -- "$matched" "$STATE" >"${STATE}.tmp" || true
+        mv -f "${STATE}.tmp" "$STATE"
+      fi
+      exit 0
     fi
     chain_exists "$table" "$chain" || exit 1
     printf 'RULE\t%s\t%s\t%s\n' "$table" "$chain" "$spec" >>"$STATE"

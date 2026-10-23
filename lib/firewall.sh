@@ -230,6 +230,54 @@ tm_iptables_add_if_missing() {
   tm_must "${rule[@]}"
 }
 
+# iptables -S prints one rule per line. The comment is wrapped in quotes, and
+# -p udp is repeated as -m udp. Split on spaces even when IFS has no space.
+tm_iptables_split_spec() {
+  local line="$1"
+  local -n _tm_spec=$2
+  local token rest
+  _tm_spec=()
+  rest="$line"
+  while [[ "$rest" == [[:space:]]* ]]; do
+    rest="${rest:1}"
+  done
+  while [[ -n "$rest" ]]; do
+    if [[ "$rest" == \"* ]]; then
+      rest="${rest:1}"
+      token="${rest%%\"*}"
+      if [[ "$rest" == *"\""* ]]; then
+        rest="${rest#*\"}"
+      else
+        rest=""
+      fi
+    else
+      token="${rest%%[[:space:]]*}"
+      rest="${rest#"$token"}"
+    fi
+    [[ -n "$token" ]] && _tm_spec+=("$token")
+    while [[ "$rest" == [[:space:]]* ]]; do
+      rest="${rest:1}"
+    done
+  done
+}
+
+tm_iptables_delete_parsed() {
+  local bin="$1"
+  local table="$2"
+  local chain="$3"
+  local comment="$4"
+  shift 4
+  if [[ "$#" -eq 0 ]]; then
+    tm_error "Could not parse the iptables rule for ${comment}."
+    return 1
+  fi
+  if ! tm_argv_is_safe "$bin" -t "$table" -D "$chain" "$@"; then
+    tm_error "The saved iptables rule for ${comment} cannot be deleted safely."
+    return 1
+  fi
+  tm_must "$bin" -t "$table" -D "$chain" "$@"
+}
+
 tm_iptables_delete_comment() {
   local table="$1"
   local chain="$2"
@@ -241,8 +289,8 @@ tm_iptables_delete_comment() {
     [[ "$line" == *"--comment ${comment}"* || "$line" == *"--comment \"${comment}\""* ]] || continue
     [[ "$line" == "-A ${chain} "* ]] || continue
     prefix="-A ${chain} "
-    read -r -a spec <<<"${line#"${prefix}"}"
-    tm_must iptables -t "$table" -D "$chain" "${spec[@]}" || return 1
+    tm_iptables_split_spec "${line#"${prefix}"}" spec
+    tm_iptables_delete_parsed iptables "$table" "$chain" "$comment" "${spec[@]}" || return 1
   done < <(tm_iptables_chain_rules "$table" "$chain")
 }
 
@@ -573,8 +621,8 @@ tm_ip6tables_input_delete_comment() {
     [[ "$line" == *"--comment ${comment}"* || "$line" == *"--comment \"${comment}\""* ]] || continue
     [[ "$line" == "-A TM_INPUT "* ]] || continue
     prefix="-A TM_INPUT "
-    read -r -a spec <<<"${line#"${prefix}"}"
-    tm_must ip6tables -t filter -D TM_INPUT "${spec[@]}" || return 1
+    tm_iptables_split_spec "${line#"${prefix}"}" spec
+    tm_iptables_delete_parsed ip6tables filter TM_INPUT "$comment" "${spec[@]}" || return 1
   done < <(tm_ip6tables_chain_rules)
 }
 

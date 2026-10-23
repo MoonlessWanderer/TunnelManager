@@ -106,7 +106,8 @@ tm_iptables_rule_is_safe() {
         [[ "$i" -lt "$n" ]] || return 1
         module="${args[$i]}"
         case "$module" in
-          comment|conntrack) ;;
+          # iptables -S adds -m udp or -m tcp for the protocol already named by -p.
+          comment|conntrack|tcp|udp) ;;
           *) return 1 ;;
         esac
         ;;
@@ -114,6 +115,8 @@ tm_iptables_rule_is_safe() {
         i=$((i + 1))
         [[ "$i" -lt "$n" ]] || return 1
         comment="${args[$i]}"
+        comment="${comment#\"}"
+        comment="${comment%\"}"
         ;;
       --ctstate)
         i=$((i + 1))

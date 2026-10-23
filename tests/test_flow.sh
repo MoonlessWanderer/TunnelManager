@@ -20,6 +20,34 @@ if grep -q '^tm-edge$' "${TM_FAKE_ROOT}/ip.links"; then
 else
   tm_fail "wireguard interface was not created"
 fi
+
+TM_BIN_OVERRIDE[systemctl]="${TM_REPO}/tests/fakes/systemctl"
+printf '%s\n' \
+  "[Interface]" \
+  "PrivateKey = ${TM_TEST_PRIV}" \
+  "Address = 10.200.0.1/30" \
+  "ListenPort = 51820" \
+  "Table = off" \
+  "" \
+  "[Peer]" \
+  "PublicKey = ${TM_TEST_PUB}" \
+  "AllowedIPs = 10.200.0.2/32" \
+  >"${TM_WG_DIR}/tm-gone.conf"
+tm_expect_fail "wireguard start fails when the interface stays down" tm_wg_up_exec gone
+if grep -q 'did not come up' "$TM_LOG_FILE"; then
+  tm_pass "missing wireguard interface is reported"
+else
+  tm_fail "missing wireguard interface was not reported"
+fi
+unset 'TM_BIN_OVERRIDE[systemctl]'
+rm -f -- "${TM_WG_DIR}/tm-gone.conf"
+
+tm_expect_fail "rp_filter is not written for a missing interface" tm_rp_filter_apply_exec tm-missing
+if grep -q 'tm-missing' "${TM_FAKE_ROOT}/sysctl.log" 2>/dev/null; then
+  tm_fail "sysctl ran for a missing interface"
+else
+  tm_pass "sysctl did not run for a missing interface"
+fi
 conf="${TM_WG_DIR}/tm-edge.conf"
 tm_expect_ok "generated wireguard config is safe" tm_wg_assert_conf_safe "$conf"
 if grep -q "$TM_TEST_PRIV" "$TM_LOG_FILE"; then

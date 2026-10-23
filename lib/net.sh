@@ -386,6 +386,10 @@ tm_rp_filter_apply_exec() {
   local iface="$1"
   local key prev_file current
   tm_valid_tunnel_iface "$iface" || return 1
+  if ! tm_iface_exists "$iface"; then
+    tm_error "Interface ${iface} is not up, so rp_filter was not changed."
+    return 1
+  fi
   key=$(tm_rp_filter_key "$iface")
   prev_file="${TM_VAR}/rp_${iface}.prev"
   current=$(tm_run_quiet sysctl -n "$key" 2>/dev/null | tr -d '[:space:]' || true)

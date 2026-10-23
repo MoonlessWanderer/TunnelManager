@@ -207,9 +207,24 @@ tm_wg_up_exec() {
   fi
   if tm_use_systemd; then
     tm_must systemctl enable --now "wg-quick@${iface}" || return 1
+  else
+    tm_must wg-quick up "$iface" || return 1
+  fi
+  if tm_iface_exists "$iface"; then
     return 0
   fi
-  tm_must wg-quick up "$iface"
+  if tm_use_systemd; then
+    tm_warn "WireGuard interface ${iface} is missing after startup. Restarting wg-quick@${iface}."
+    tm_must systemctl restart "wg-quick@${iface}" || true
+    if tm_iface_exists "$iface"; then
+      return 0
+    fi
+    tm_error "WireGuard interface ${iface} did not come up."
+    tm_run systemctl --no-pager status "wg-quick@${iface}" || true
+    return 1
+  fi
+  tm_error "WireGuard interface ${iface} did not come up."
+  return 1
 }
 
 tm_wg_down_exec() {

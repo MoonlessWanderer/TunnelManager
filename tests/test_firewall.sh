@@ -54,6 +54,28 @@ else
   tm_fail "empty chain was not deleted"
 fi
 
+printf '%s\n' "CHAIN filter TM_INPUT" >>"${TM_FAKE_ROOT}/iptables.state"
+printf 'RULE\tfilter\tTM_INPUT\t%s\n' \
+  '-i eth0 -p udp -m udp --dport 51820 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment "tm:wg:edge:input" -j ACCEPT' \
+  >>"${TM_FAKE_ROOT}/iptables.state"
+tm_expect_ok "iptables -S rule with -m udp can be deleted" \
+  tm_iptables_delete_comment filter TM_INPUT tm:wg:edge:input
+if grep -q 'tm:wg:edge:input' "${TM_FAKE_ROOT}/iptables.state"; then
+  tm_fail "quoted input rule was not removed"
+else
+  tm_pass "quoted input rule was removed"
+fi
+
+tm_split_saved_rule() {
+  local -a spec=()
+  local joined
+  IFS=$'\n' tm_iptables_split_spec '-i eth0 -p udp -m udp --dport 51820 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment "tm:wg:edge:input" -j ACCEPT' spec
+  joined=$(printf '%s ' "${spec[@]}")
+  [[ "$joined" == '-i eth0 -p udp -m udp --dport 51820 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment tm:wg:edge:input -j ACCEPT ' ]] || return 1
+  tm_iptables_argv_is_safe iptables -t filter -D TM_INPUT "${spec[@]}"
+}
+tm_expect_ok "saved rule splits when IFS has no space" tm_split_saved_rule
+
 TM_BIN_OVERRIDE[nft]="${TM_REPO}/tests/fakes/nft"
 unset 'TM_BIN_OVERRIDE[iptables]'
 rm -f -- "${TM_FAKE_ROOT}/nft.log" "${TM_FAKE_ROOT}/nft.state" "${TM_FAKE_ROOT}/nft.handle"
