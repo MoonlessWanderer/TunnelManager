@@ -194,20 +194,51 @@ tm_setup_print_foreign() {
   local foreign_tun="$6"
   local cidr="$7"
   local ports="$8"
-  local token
+  local token bold="" reset=""
   token=$(tm_setup_token "$type" "$name" "$iran_ip" "$foreign_ip" "$iran_tun" "$foreign_tun" "$cidr")
+  if tm_styled 1; then
+    bold=$'\033[1m'
+    reset=$'\033[0m'
+  fi
   if [[ "$type" == "gre" ]]; then
-    printf '\n%s\n' "On the foreign server, install Tunnel Manager if needed, then run:"
-    printf '%s\n\n' "sudo tunnel-manager quick ${token}"
+    printf '\n  %s\n\n' "On the foreign server, install Tunnel Manager if needed, then run:"
+    printf '    %s%s%s\n\n' "$bold" "sudo tunnel-manager quick ${token}" "$reset"
     if [[ -n "$ports" ]]; then
-      printf '%s\n' "Forwarded TCP ports stay on this Iran server: ${ports}"
+      printf '  %s\n' "Forwarded TCP ports stay on this Iran server: $(tm_setup_ports_label "$ports")"
     else
-      printf '%s\n' "No TCP ports were forwarded. This GRE tunnel carries traffic only."
+      printf '  %s\n' "No TCP ports were forwarded. This GRE tunnel carries traffic only."
     fi
     return 0
   fi
-  printf '\n%s\n' "No tunnel command is required on the foreign server."
-  printf '%s\n' "Keep these TCP services listening there: ${ports}"
+  printf '\n  %s\n' "No tunnel command is required on the foreign server."
+  printf '  %s\n' "Keep these TCP services listening there: $(tm_setup_ports_label "$ports")"
+}
+
+tm_setup_ports_label() {
+  local spec="$1"
+  local item out=""
+  local -a items=()
+  if [[ -z "$spec" ]]; then
+    printf '%s\n' "none"
+    return 0
+  fi
+  IFS=',' read -r -a items <<<"$spec"
+  for item in "${items[@]}"; do
+    if [[ "$item" == *=* ]]; then
+      item="${item%%=*} -> ${item#*=}"
+    fi
+    out+="${out:+, }${item}"
+  done
+  printf '%s\n' "$out"
+}
+
+tm_setup_ensure_boot() {
+  if ! tm_use_systemd || tm_service_boot_enabled; then
+    return 0
+  fi
+  if ! (tm_action_service_enable); then
+    tm_warn "Saved tunnels will not return after reboot until you run: sudo tunnel-manager service enable"
+  fi
 }
 
 tm_setup_forwards_for() {
@@ -258,6 +289,7 @@ tm_setup_add_ports() {
       --listen-port "${listen_ports[$i]}" --dest-port "${dest_ports[$i]}" \
       --tunnel "$name" --snat auto --yes || return 1
   done
+  tm_setup_ensure_boot
 }
 
 tm_setup_reject_taken_ports() {
@@ -286,8 +318,7 @@ tm_setup_apply_iran() {
   local ports="${10}"
   local -a listen_ports=() dest_ports=()
   local -a create_args=()
-  local allow i fname
-  allow="${TM_ALLOW_GRE:-0}"
+  local i fname
   tm_setup_reject_taken_ports "$ports" || return 1
   tm_setup_split_ports "$ports" listen_ports dest_ports || return 1
   if [[ "$type" == "forward" && "${#listen_ports[@]}" -eq 0 ]]; then
@@ -297,7 +328,6 @@ tm_setup_apply_iran() {
   if [[ ! -f "$(tm_host_file)" ]]; then
     tm_action_init --role iran --public-ip "$local_pub" --wan-iface "$wan" \
       --ssh-port "$ssh_port" --yes || return 1
-    TM_ALLOW_GRE="$allow"
   fi
   create_args=(
     --name "$name" --type "$type"
@@ -305,9 +335,6 @@ tm_setup_apply_iran() {
     --local-tunnel-ip "$local_tun" --remote-tunnel-ip "$remote_tun"
     --cidr "$cidr" --wan-iface "$wan" --yes
   )
-  if [[ "$type" == "gre" && "$allow" == "1" ]]; then
-    create_args+=(--i-understand-no-encryption)
-  fi
   tm_action_tunnel_create "${create_args[@]}" || return 1
   for i in "${!listen_ports[@]}"; do
     fname=$(tm_setup_forward_name "${listen_ports[$i]}" "${dest_ports[$i]}") || {
@@ -323,6 +350,7 @@ tm_setup_apply_iran() {
       return 1
     fi
   done
+  tm_setup_ensure_boot
   if [[ "${TM_DRY_RUN:-0}" != "1" ]]; then
     tm_setup_print_foreign "$type" "$name" "$local_pub" "$remote_pub" \
       "$local_tun" "$remote_tun" "$cidr" "$ports"
@@ -330,7 +358,7 @@ tm_setup_apply_iran() {
 }
 
 tm_action_quick() {
-  local token="" allow wan ssh_port
+  local token="" wan ssh_port
   local -A spec=()
   local -a flags=() create_args=()
   while [[ "$#" -gt 0 ]]; do
@@ -344,7 +372,7 @@ tm_action_quick() {
         shift
         ;;
       --i-understand-no-encryption)
-        TM_ALLOW_GRE=1
+        # Accepted for setup commands printed by older versions.
         shift
         ;;
       --token)
@@ -382,14 +410,12 @@ tm_action_quick() {
   if [[ -f "$(tm_tunnel_file "${spec[name]}")" ]]; then
     tm_die "Tunnel ${spec[name]} already exists."
   fi
-  allow="${TM_ALLOW_GRE:-0}"
   [[ "${TM_YES:-0}" == "1" ]] && flags+=(--yes)
   [[ "${TM_DRY_RUN:-0}" == "1" ]] && flags+=(--dry-run)
   ssh_port=$(tm_ssh_port)
   if [[ ! -f "$(tm_host_file)" ]]; then
     tm_action_init --role foreign --public-ip "${spec[foreign_ip]}" --wan-iface "$wan" \
       --ssh-port "$ssh_port" "${flags[@]}" || return 1
-    TM_ALLOW_GRE="$allow"
   fi
   create_args=(
     --name "${spec[name]}" --type gre
@@ -401,8 +427,6 @@ tm_action_quick() {
     --wan-iface "$wan"
   )
   create_args+=("${flags[@]}")
-  if [[ "$allow" == "1" ]]; then
-    create_args+=(--i-understand-no-encryption)
-  fi
-  tm_action_tunnel_create "${create_args[@]}"
+  tm_action_tunnel_create "${create_args[@]}" || return $?
+  tm_setup_ensure_boot
 }

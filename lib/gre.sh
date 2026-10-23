@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # shellcheck shell=bash disable=SC2034
 # Tunnel Manager — kernel GRE tunnels.
-# GRE has no encryption. Callers must show that warning before apply.
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   printf '%s\n' "gre.sh is a library and must be sourced." >&2
@@ -12,14 +11,6 @@ if [[ -n "${TM_GRE_LOADED:-}" ]]; then
   return 0
 fi
 TM_GRE_LOADED=1
-
-tm_gre_warning_text() {
-  cat <<'EOF'
-WARNING: GRE tunnels have no encryption and no authentication.
-Traffic can be read and modified in transit.
-The default route will not be changed.
-EOF
-}
 
 tm_gre_up_exec() {
   local name="$1"

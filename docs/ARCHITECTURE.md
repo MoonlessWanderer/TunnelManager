@@ -23,8 +23,7 @@ local public address. No route is added.
 
 GRE uses `ip link add type gre` for IPv4 endpoints and `type ip6gre` for IPv6
 endpoints. The inner address is IPv4 `/24` through `/31`, or IPv6 `/64`
-through `/127`. There is no encryption and no authentication. The
-acknowledgement is stored as `TM_GRE_ACK=yes`. The tool never runs
+through `/127`. The tool never runs
 `ip route add`, `replace`, or `del`.
 
 `apply` records whether a tunnel interface was already up. Rollback stops
@@ -86,7 +85,8 @@ does not appear in the plan.
 `tunnel-manager-apply.service` is a oneshot unit. Its start command is
 `tunnel-manager apply --yes` and its stop command is `tunnel-manager down
 --yes`. Saved state is the confirmation, so boot does not prompt.
-`service enable` enables the apply unit only.
+`service enable` enables the apply unit only. Menu setup and `quick` call it
+after a tunnel is saved, unless the unit is already enabled.
 
 ## Backups
 

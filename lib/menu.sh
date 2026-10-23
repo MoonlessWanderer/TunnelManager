@@ -12,10 +12,59 @@ if [[ -n "${TM_MENU_LOADED:-}" ]]; then
 fi
 TM_MENU_LOADED=1
 
+# A note set here is shown once, on the next menu screen.
+TM_MENU_NOTE=""
+TM_MENU_STATUS=0
+
+tm_menu_color_on() {
+  case "${TM_MENU_COLOR:-auto}" in
+    0|no|off) return 1 ;;
+    1|yes|on) return 0 ;;
+  esac
+  tm_styled 2
+}
+
+tm_menu_sgr() {
+  if ! tm_menu_color_on; then
+    return 0
+  fi
+  case "$1" in
+    dim) printf '\033[2m' ;;
+    bold) printf '\033[1m' ;;
+    accent) printf '\033[36m' ;;
+    reset) printf '\033[0m' ;;
+  esac
+}
+
+tm_menu_home() {
+  if tm_tty_scripted || [[ "${TERM:-dumb}" == "dumb" || ! -t 2 || ! -w /dev/tty ]]; then
+    return 0
+  fi
+  printf '\033[H\033[2J' >/dev/tty
+}
+
+tm_menu_header() {
+  printf '\n  %sTunnel Manager%s\n' "$(tm_menu_sgr bold)" "$(tm_menu_sgr reset)"
+  printf '  %s%s%s\n' "$(tm_menu_sgr dim)" "$1" "$(tm_menu_sgr reset)"
+}
+
+tm_menu_text() {
+  tm_tty_printf '  %s\n' "$1"
+}
+
+tm_menu_hint() {
+  tm_tty_printf '  %s%s%s\n' "$(tm_menu_sgr dim)" "$1" "$(tm_menu_sgr reset)"
+}
+
+tm_menu_row() {
+  tm_tty_printf '  %s%-12s%s  %s\n' "$(tm_menu_sgr dim)" "$1" "$(tm_menu_sgr reset)" "$2"
+}
+
 tm_menu_pause() {
   local _unused=""
-  if [[ -r /dev/tty ]]; then
-    read -r -p "Press Enter to continue. " _unused </dev/tty || true
+  if tm_tty_ready; then
+    tm_tty_printf '\n  %sPress Enter to continue.%s ' "$(tm_menu_sgr dim)" "$(tm_menu_sgr reset)"
+    tm_tty_read _unused || true
   fi
 }
 
@@ -28,10 +77,51 @@ tm_menu_run() {
   )
   status=$?
   set -e
-  if [[ "$status" -ne 0 ]]; then
+  TM_MENU_STATUS="$status"
+  # Status 2 means the user declined, and the action already said so.
+  if [[ "$status" -ne 0 && "$status" -ne 2 ]]; then
     tm_warn "The command exited with status ${status}."
   fi
   tm_menu_pause
+}
+
+tm_menu_render() {
+  local title="$1"
+  local exit_label="$2"
+  shift 2
+  local -a items=("$@")
+  local i width accent="" reset=""
+  accent=$(tm_menu_sgr accent)
+  reset=$(tm_menu_sgr reset)
+  width="${#items[@]}"
+  width="${#width}"
+  tm_menu_header "${title:-$TM_VERSION}"
+  printf '\n'
+  if [[ -n "${TM_MENU_NOTE:-}" ]]; then
+    printf '  %s\n\n' "$TM_MENU_NOTE"
+  fi
+  if [[ -n "${TM_MENU_ALERT:-}" ]]; then
+    printf '  %s! %s%s\n\n' "$(tm_menu_sgr bold)" "$TM_MENU_ALERT" "$reset"
+  fi
+  for i in "${!items[@]}"; do
+    printf '  %s%*d%s  %s\n' "$accent" "$width" "$((i + 1))" "$reset" "${items[$i]}"
+  done
+  printf '\n  %s%*d%s  %s\n' "$accent" "$width" 0 "$reset" "$exit_label"
+}
+
+tm_menu_choice_index() {
+  local raw="$1"
+  local count="$2"
+  local choice="$raw"
+  choice="${choice#"${choice%%[![:space:]]*}"}"
+  choice="${choice%"${choice##*[![:space:]]}"}"
+  if [[ "$choice" =~ ^[0-9]+$ && ${#choice} -le 4 ]]; then
+    if (( 10#$choice >= 0 && 10#$choice <= count )); then
+      printf '%s\n' "$((10#$choice))"
+      return 0
+    fi
+  fi
+  return 1
 }
 
 tm_menu_choose() {
@@ -39,61 +129,34 @@ tm_menu_choose() {
   local exit_label="$2"
   shift 2
   local -a items=("$@")
-  local choice=""
-  local i
-  printf '\n%s\n' "═══════════════════════════════════════════" >/dev/tty
-  printf '\n' >/dev/tty
-  if [[ -n "$title" ]]; then
-    printf '  %s\n\n' "$title" >/dev/tty
-  fi
-  for i in "${!items[@]}"; do
-    printf '  %s. %s\n' "$((i + 1))" "${items[$i]}" >/dev/tty
-  done
-  printf '  %s. %s\n' "0" "$exit_label" >/dev/tty
-  printf '\n%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >/dev/tty
-  if [[ ! -r /dev/tty ]]; then
+  local choice="" picked="" TM_MENU_ALERT=""
+  if ! tm_tty_ready; then
     tm_die "A terminal is required for interactive input."
   fi
-  read -r -p "Enter your choice [0–${#items[@]}]: " choice </dev/tty || return 1
-  printf '%s\n' "$choice"
-}
-
-tm_menu_forward() {
-  local choice=""
   while true; do
-    choice=$(tm_menu_choose "Port forwards" "Back" \
-      "Add forward" \
-      "Edit a forward" \
-      "Delete a forward" \
-      "List forwards" \
-      "Test a forward") || return 1
-    case "$choice" in
-      1) tm_menu_add_forward_prompt ;;
-      2) tm_menu_edit_forward ;;
-      3) tm_menu_delete_forward ;;
-      4) tm_action_forward_list; tm_menu_pause ;;
-      5) tm_menu_test_forward ;;
-      0) return 0 ;;
-      *) tm_warn "Unknown choice." ;;
-    esac
+    tm_menu_home
+    tm_tty_printf '%s\n\n' "$(tm_menu_render "$title" "$exit_label" "${items[@]}")"
+    tm_tty_printf '  Enter your choice [0-%s]: ' "${#items[@]}"
+    if ! tm_tty_read choice; then
+      tm_tty_printf '\n'
+      return 1
+    fi
+    if picked=$(tm_menu_choice_index "$choice" "${#items[@]}"); then
+      tm_tty_printf '\n'
+      printf '%s\n' "$picked"
+      return 0
+    fi
+    TM_MENU_ALERT="Enter a number from the list."
   done
 }
 
-tm_menu_default_tunnel() {
-  local -a names=()
-  local line
-  if [[ -f "$(tm_tunnel_file edge)" ]]; then
-    printf '%s\n' "edge"
-    return 0
-  fi
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && names+=("$line")
-  done < <(tm_list_tunnels)
-  if [[ "${#names[@]}" -ge 1 ]]; then
-    printf '%s\n' "${names[0]}"
-    return 0
-  fi
-  printf '%s\n' "edge"
+tm_menu_pick() {
+  local -n _tm_picked=$1
+  shift
+  local _tm_pick_status=0
+  _tm_picked=$(tm_menu_choose "$@") || _tm_pick_status=$?
+  TM_MENU_NOTE=""
+  return "$_tm_pick_status"
 }
 
 tm_menu_ssh_port() {
@@ -106,63 +169,6 @@ tm_menu_ssh_port() {
     fi
   fi
   printf '%s\n' "22"
-}
-
-tm_menu_add_forward_prompt() {
-  local proto=""
-  tm_prompt proto "Protocol tcp or udp" "tcp" || return 1
-  tm_menu_add_forward "$proto"
-}
-
-tm_menu_add_forward() {
-  local proto="$1"
-  local name="" listen_port="" dest_ip="" dest_port="" source_ip="" ingress="" tunnel="" snat="auto"
-  local -A tun=()
-  tm_prompt name "Forward name" || return 1
-  tm_prompt listen_port "Listen port" || return 1
-  tm_prompt tunnel "Existing tunnel name or '-' " "$(tm_menu_default_tunnel)" || return 1
-  if [[ "$tunnel" != "-" && -f "$(tm_tunnel_file "$tunnel")" ]] && tm_tunnel_load "$tunnel" tun; then
-    dest_ip="${tun[TM_REMOTE_TUNNEL_IP]}"
-    source_ip="${tun[TM_LOCAL_TUNNEL_IP]}"
-    ingress="${tun[TM_WAN_IFACE]}"
-  fi
-  tm_prompt dest_ip "Destination IP" "$dest_ip" || return 1
-  tm_prompt dest_port "Destination port" "$listen_port" || return 1
-  tm_prompt source_ip "Source tunnel IP" "$source_ip" || return 1
-  tm_prompt ingress "Ingress interface" "$ingress" || return 1
-  tm_prompt snat "SNAT auto, always, or never" "auto" || return 1
-  if [[ "$tunnel" == "-" ]]; then
-    tm_menu_run tm_action_forward_add --name "$name" --proto "$proto" \
-      --listen-port "$listen_port" --dest-ip "$dest_ip" --dest-port "$dest_port" \
-      --source-ip "$source_ip" --ingress-iface "$ingress" --snat "$snat"
-  else
-    tm_menu_run tm_action_forward_add --name "$name" --proto "$proto" \
-      --listen-port "$listen_port" --dest-ip "$dest_ip" --dest-port "$dest_port" \
-      --source-ip "$source_ip" --ingress-iface "$ingress" --snat "$snat" --tunnel "$tunnel"
-  fi
-}
-
-tm_menu_edit_forward() {
-  local name="" listen_port=""
-  tm_prompt name "Forward name" || return 1
-  tm_prompt listen_port "New listen port, or '-' to keep" "-" || return 1
-  if [[ "$listen_port" == "-" ]]; then
-    tm_menu_run tm_action_forward_edit --name "$name"
-  else
-    tm_menu_run tm_action_forward_edit --name "$name" --listen-port "$listen_port"
-  fi
-}
-
-tm_menu_delete_forward() {
-  local name=""
-  tm_prompt name "Forward name" || return 1
-  tm_menu_run tm_action_forward_delete --name "$name"
-}
-
-tm_menu_test_forward() {
-  local name=""
-  tm_prompt name "Forward name" || return 1
-  tm_menu_run tm_action_forward_test --name "$name"
 }
 
 tm_menu_prefill_uplink() {
@@ -247,8 +253,9 @@ tm_menu_collect_ports() {
   local -n _tm_spec=$1
   local required="$2"
   local line="" listen="" dest="" spec="" piece=""
-  printf '\n%s\n' "TCP ports. One per line: 443 or 443=2053" >/dev/tty
-  printf '%s\n' "Press Enter on an empty line to finish." >/dev/tty
+  tm_tty_printf '\n'
+  tm_menu_hint "TCP ports. One per line: 443 or 443=2053"
+  tm_menu_hint "Press Enter on an empty line to finish."
   while true; do
     line=""
     tm_prompt line "TCP port" || return 1
@@ -330,35 +337,38 @@ tm_menu_iface_present() {
   return 0
 }
 
+tm_menu_boot_row() {
+  if tm_use_systemd; then
+    tm_menu_row "After reboot" "restored automatically"
+  fi
+}
+
 tm_menu_setup_iran() {
   local local_pub="" remote_pub="" wan="" ssh_port="" kind=""
-  local name="" local_tun="" remote_tun="" cidr="32" ports=""
-  local saved_yes="" saved_gre=""
+  local name="" local_tun="" remote_tun="" cidr="32" ports="" saved_yes=""
   ssh_port=$(tm_menu_ssh_port)
   tm_menu_prefill_uplink wan local_pub
   tm_menu_prompt_ipv4 local_pub "This server IPv4" || return 1
   tm_menu_prompt_ipv4 remote_pub "Foreign server IPv4" "$local_pub" || return 1
-  kind=$(tm_menu_choose "Tunnel type" "Back" "Plain port forward" "GRE tunnel") || return 1
+  tm_menu_pick kind "Tunnel type" "Back" "Plain port forward" "GRE tunnel" || return 1
   case "$kind" in
     1) kind="forward" ;;
     2) kind="gre" ;;
-    0) return 0 ;;
-    *)
-      tm_warn "Unknown choice."
-      return 0
-      ;;
+    *) return 0 ;;
   esac
   if [[ "$kind" == "gre" ]]; then
     local_tun="10.200.0.1"
     remote_tun="10.200.0.2"
     cidr="30"
-    tm_prompt local_tun "Local tunnel IP" "$local_tun" || return 1
-    tm_prompt remote_tun "Remote tunnel IP" "$remote_tun" || return 1
-    tm_prompt cidr "Prefix length" "$cidr" || return 1
-    if ! tm_tunnel_pair_ok "$local_tun" "$remote_tun" "$cidr"; then
-      tm_warn "Those tunnel addresses are not two different hosts in one IPv4 prefix from 24 to 31."
-      return 1
-    fi
+    while true; do
+      tm_prompt local_tun "Local tunnel IP" "$local_tun" || return 1
+      tm_prompt remote_tun "Remote tunnel IP" "$remote_tun" || return 1
+      tm_prompt cidr "Prefix length" "$cidr" || return 1
+      if tm_tunnel_pair_ok "$local_tun" "$remote_tun" "$cidr"; then
+        break
+      fi
+      tm_warn "Use two different IPv4 hosts in one prefix from 24 to 31."
+    done
   else
     local_tun="$local_pub"
     remote_tun="$remote_pub"
@@ -372,100 +382,108 @@ tm_menu_setup_iran() {
   else
     tm_menu_collect_ports ports no || return 1
   fi
-  name=$(tm_setup_alloc_name "$kind") || return 1
-  {
-    printf '\n%s\n' "Iran ${local_pub} -> foreign ${remote_pub}"
-    printf '%s\n' "Type ${kind}, name ${name}, WAN ${wan}"
-    if [[ "$kind" == "gre" ]]; then
-      printf '%s\n' "Inner ${local_tun} -> ${remote_tun}/${cidr}"
-    fi
-    if [[ -n "$ports" ]]; then
-      printf '%s\n' "TCP ports ${ports}"
-    else
-      printf '%s\n' "No TCP ports. GRE tunnel only."
-    fi
-  } >/dev/tty
-  if [[ "$kind" == "gre" ]]; then
-    tm_gre_warning_text >/dev/tty
-    if ! tm_confirm_phrase "GRE is not encrypted" "Type 'GRE is not encrypted' to continue:"; then
-      tm_info "Setup was not started."
-      return 0
-    fi
+  if ! name=$(tm_setup_alloc_name "$kind"); then
+    TM_MENU_NOTE="Setup was not started. No free tunnel name is left."
+    return 0
   fi
+  tm_tty_printf '\n'
+  tm_menu_row "This server" "$local_pub"
+  tm_menu_row "Foreign" "$remote_pub"
+  if [[ "$kind" == "gre" ]]; then
+    tm_menu_row "Type" "GRE"
+    tm_menu_row "Inner" "${local_tun} -> ${remote_tun}/${cidr}"
+  else
+    tm_menu_row "Type" "Port forward"
+  fi
+  tm_menu_row "Name" "$name"
+  tm_menu_row "WAN" "$wan"
+  tm_menu_row "Ports" "$(tm_setup_ports_label "$ports")"
+  tm_menu_boot_row
+  tm_tty_printf '\n'
   if ! tm_confirm "Apply this setup?"; then
-    tm_info "Setup was not started."
+    TM_MENU_NOTE="Setup was not started."
     return 0
   fi
   saved_yes="${TM_YES:-0}"
-  saved_gre="${TM_ALLOW_GRE:-0}"
   TM_YES=1
-  if [[ "$kind" == "gre" ]]; then
-    TM_ALLOW_GRE=1
-  fi
   tm_menu_run tm_setup_apply_iran "$name" "$kind" "$local_pub" "$remote_pub" \
     "$local_tun" "$remote_tun" "$cidr" "$wan" "$ssh_port" "$ports"
   TM_YES="$saved_yes"
-  TM_ALLOW_GRE="$saved_gre"
 }
 
 tm_menu_setup_foreign() {
-  local pasted="" token="" saved_yes="" saved_gre=""
+  local pasted="" token="" saved_yes=""
   local -A parsed=()
-  tm_prompt pasted "Paste the setup command from the Iran server" || return 1
-  if ! token=$(tm_setup_extract_token "$pasted"); then
-    tm_warn "That text does not contain a setup command."
-    return 1
-  fi
-  if ! tm_setup_parse_token "$token" parsed; then
+  tm_menu_hint "Press Enter on an empty line to go back."
+  while true; do
+    pasted=""
+    tm_prompt pasted "Paste the setup command from the Iran server" || return 1
+    if [[ -z "$pasted" ]]; then
+      return 0
+    fi
+    if ! token=$(tm_setup_extract_token "$pasted"); then
+      tm_warn "That text does not contain a setup command."
+      continue
+    fi
+    parsed=()
+    if tm_setup_parse_token "$token" parsed; then
+      break
+    fi
     tm_warn "The setup command is invalid."
-    return 1
-  fi
+  done
   if [[ "${parsed[type]}" != "gre" ]]; then
     tm_menu_run tm_action_quick --token "$token"
     return 0
   fi
-  tm_gre_warning_text >/dev/tty
-  if ! tm_confirm_phrase "GRE is not encrypted" "Type 'GRE is not encrypted' to continue:"; then
-    tm_info "Setup was not started."
-    return 0
-  fi
+  tm_tty_printf '\n'
+  tm_menu_row "This server" "${parsed[foreign_ip]}"
+  tm_menu_row "Iran" "${parsed[iran_ip]}"
+  tm_menu_row "Type" "GRE"
+  tm_menu_row "Inner" "${parsed[foreign_tun]} -> ${parsed[iran_tun]}/${parsed[cidr]}"
+  tm_menu_row "Name" "${parsed[name]}"
+  tm_menu_boot_row
+  tm_tty_printf '\n'
   if ! tm_confirm "Apply this GRE tunnel on the foreign server?"; then
-    tm_info "Setup was not started."
+    TM_MENU_NOTE="Setup was not started."
     return 0
   fi
   saved_yes="${TM_YES:-0}"
-  saved_gre="${TM_ALLOW_GRE:-0}"
   TM_YES=1
-  TM_ALLOW_GRE=1
-  tm_menu_run tm_action_quick --token "$token" --yes --i-understand-no-encryption
+  tm_menu_run tm_action_quick --token "$token" --yes
   TM_YES="$saved_yes"
-  TM_ALLOW_GRE="$saved_gre"
 }
 
 tm_menu_show_tunnel() {
   local name="$1"
-  local line
+  local line="" kind="" fname="" proto="" listen="" dest="" label="Ports"
   local -A row=()
-  tm_tunnel_load "$name" row || {
-    tm_warn "Tunnel ${name} was not found."
-    return 1
-  }
-  printf '\n%s\n' "name=${name}"
-  printf '%s\n' "type=${row[TM_TUNNEL_TYPE]:-}"
-  printf '%s\n' "state=${row[TM_TUNNEL_STATE]:-}"
-  printf '%s\n' "public=${row[TM_LOCAL_PUBLIC_IP]:-} -> ${row[TM_REMOTE_PUBLIC_IP]:-}"
-  if [[ "${row[TM_TUNNEL_TYPE]:-}" == "gre" ]]; then
-    printf '%s\n' "inner=${row[TM_LOCAL_TUNNEL_IP]:-} -> ${row[TM_REMOTE_TUNNEL_IP]:-}/${row[TM_TUNNEL_CIDR]:-}"
-    printf '%s\n' "interface=$(tm_tunnel_iface "$name")"
+  if ! tm_tunnel_load "$name" row; then
+    TM_MENU_NOTE="Tunnel ${name} was not found."
+    return 0
   fi
-  printf '%s\n' "wan=${row[TM_WAN_IFACE]:-}"
-  if tm_setup_forwards_for "$name" | grep -q .; then
-    printf '%s\n' "ports:"
-    while IFS= read -r line; do
-      printf '  %s\n' "$line"
-    done < <(tm_setup_forwards_for "$name")
-  else
-    printf '%s\n' "ports=none"
+  kind="${row[TM_TUNNEL_TYPE]:-}"
+  tm_menu_home
+  tm_tty_printf '%s\n\n' "$(tm_menu_header "Tunnel ${name}")"
+  case "$kind" in
+    gre) tm_menu_row "Type" "GRE" ;;
+    forward) tm_menu_row "Type" "Port forward" ;;
+    *) tm_menu_row "Type" "$kind" ;;
+  esac
+  tm_menu_row "State" "${row[TM_TUNNEL_STATE]:-}"
+  tm_menu_row "Public" "${row[TM_LOCAL_PUBLIC_IP]:-} -> ${row[TM_REMOTE_PUBLIC_IP]:-}"
+  if [[ "$kind" == "gre" ]]; then
+    tm_menu_row "Inner" "${row[TM_LOCAL_TUNNEL_IP]:-} -> ${row[TM_REMOTE_TUNNEL_IP]:-}/${row[TM_TUNNEL_CIDR]:-}"
+    tm_menu_row "Interface" "$(tm_tunnel_iface "$name")"
+  fi
+  tm_menu_row "WAN" "${row[TM_WAN_IFACE]:-}"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$' \t\n' read -r fname proto listen dest <<<"$line"
+    tm_menu_row "$label" "${proto} ${listen} -> ${dest}"
+    label=""
+  done < <(tm_setup_forwards_for "$name")
+  if [[ -n "$label" ]]; then
+    tm_menu_row "Ports" "none"
   fi
   tm_menu_pause
 }
@@ -474,8 +492,12 @@ tm_menu_add_port() {
   local name="$1"
   local port_list="" saved_yes=""
   tm_menu_collect_ports port_list yes || return 1
+  tm_tty_printf '\n'
+  tm_menu_row "Ports" "$(tm_setup_ports_label "$port_list")"
+  tm_menu_boot_row
+  tm_tty_printf '\n'
   if ! tm_confirm "Add these TCP ports to ${name}?"; then
-    tm_info "No ports were added."
+    TM_MENU_NOTE="No ports were added."
     return 0
   fi
   saved_yes="${TM_YES:-0}"
@@ -495,16 +517,11 @@ tm_menu_remove_port() {
     labels+=("${fname}  ${proto} ${listen} -> ${dest}")
   done < <(tm_setup_forwards_for "$tunnel")
   if [[ "${#ids[@]}" -eq 0 ]]; then
-    tm_info "This tunnel has no port forwards."
-    tm_menu_pause
+    TM_MENU_NOTE="This tunnel has no TCP ports."
     return 0
   fi
-  choice=$(tm_menu_choose "Remove a TCP port" "Back" "${labels[@]}") || return 1
+  tm_menu_pick choice "Remove a TCP port" "Back" "${labels[@]}" || return 1
   if [[ "$choice" == "0" ]]; then
-    return 0
-  fi
-  if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#ids[@]} )); then
-    tm_warn "Unknown choice."
     return 0
   fi
   tm_menu_run tm_action_forward_delete --name "${ids[$((choice - 1))]}"
@@ -517,20 +534,17 @@ tm_menu_tunnel() {
   local choice="" label=""
   while true; do
     if ! tm_tunnel_load "$name" row; then
-      tm_info "Tunnel ${name} is gone."
+      TM_MENU_NOTE="Tunnel ${name} is gone."
       return 0
     fi
-    actions=("Show details" "Test" "Add a TCP port" "Remove a TCP port" "Delete")
+    actions=("Show details" "Test" "Add a TCP port" "Remove a TCP port")
     if [[ "${row[TM_TUNNEL_TYPE]:-}" == "gre" ]]; then
-      actions=("Show details" "Test" "Add a TCP port" "Remove a TCP port" "Restart" "Delete")
+      actions+=("Restart")
     fi
-    choice=$(tm_menu_choose "Tunnel ${name}" "Back" "${actions[@]}") || return 1
+    actions+=("Delete")
+    tm_menu_pick choice "Tunnel ${name}" "Back" "${actions[@]}" || return 1
     if [[ "$choice" == "0" ]]; then
       return 0
-    fi
-    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#actions[@]} )); then
-      tm_warn "Unknown choice."
-      continue
     fi
     label="${actions[$((choice - 1))]}"
     case "$label" in
@@ -545,7 +559,6 @@ tm_menu_tunnel() {
           return 0
         fi
         ;;
-      *) tm_warn "Unknown choice." ;;
     esac
   done
 }
@@ -569,12 +582,16 @@ tm_menu_uninstall_script() {
 
 tm_menu_uninstall() {
   local script="" prefix=""
-  script=$(tm_menu_uninstall_script) || tm_die "uninstall.sh was not found. Reinstall Tunnel Manager."
+  if ! script=$(tm_menu_uninstall_script); then
+    TM_MENU_NOTE="uninstall.sh was not found. Reinstall Tunnel Manager."
+    return 0
+  fi
   prefix="${TM_PREFIX:-/usr/local}"
-  printf '\n%s\n' "This deletes the program, saved tunnels, forwards, and logs."
-  printf '%s\n' "A missing file is skipped. Other firewall rules stay in place."
+  tm_menu_text "This deletes the program, saved tunnels, forwards, and logs."
+  tm_menu_text "A missing file is skipped. Other firewall rules stay in place."
+  tm_tty_printf '\n'
   if ! tm_confirm "Uninstall Tunnel Manager?"; then
-    tm_info "Uninstall was not started."
+    TM_MENU_NOTE="Uninstall was not started."
     return 0
   fi
   bash "$script" --prefix "$prefix" --yes --purge-state
@@ -584,43 +601,47 @@ tm_menu_uninstall() {
 tm_menu_configure() {
   local choice=""
   while true; do
-    choice=$(tm_menu_choose "This server" "Back" "Iran" "Foreign") || return 1
+    tm_menu_pick choice "This server" "Back" "Iran" "Foreign" || return 1
     case "$choice" in
       1) tm_menu_setup_iran ;;
       2) tm_menu_setup_foreign ;;
-      0) return 0 ;;
-      *) tm_warn "Unknown choice." ;;
+      *) return 0 ;;
     esac
   done
+}
+
+tm_menu_status() {
+  tm_action_status | sed 's/^/  /'
 }
 
 tm_menu_maintenance() {
   local choice="" output="" file=""
   while true; do
-    choice=$(tm_menu_choose "Maintenance" "Back" \
+    tm_menu_pick choice "Maintenance" "Back" \
       "Status" \
       "Troubleshoot" \
       "Backup" \
       "Restore" \
       "Apply saved state" \
       "Dry-run apply" \
-      "Roll back") || return 1
+      "Roll back" || return 1
     case "$choice" in
-      1) tm_action_status; tm_menu_pause ;;
+      1) tm_menu_run tm_menu_status ;;
       2) tm_menu_run tm_action_doctor ;;
       3)
         tm_prompt output "Backup output path" "${TM_VAR}/backups/manual.tar.gz" || continue
         tm_menu_run tm_action_backup_create --output "$output"
         ;;
       4)
+        file=""
         tm_prompt file "Backup file" || continue
+        [[ -n "$file" ]] || continue
         tm_menu_run tm_action_backup_restore --file "$file"
         ;;
       5) tm_menu_run tm_action_apply ;;
       6) tm_menu_run tm_action_apply --dry-run ;;
       7) tm_menu_run tm_action_rollback ;;
-      0) return 0 ;;
-      *) tm_warn "Unknown choice." ;;
+      *) return 0 ;;
     esac
   done
 }
@@ -635,16 +656,11 @@ tm_menu_leftover_ports() {
     labels+=("${fname}  ${proto} ${listen}  tunnel ${ref} is gone")
   done < <(tm_forward_orphan_lines)
   if [[ "${#ids[@]}" -eq 0 ]]; then
-    tm_info "No leftover ports are saved."
-    tm_menu_pause
+    TM_MENU_NOTE="No leftover ports are saved."
     return 0
   fi
-  choice=$(tm_menu_choose "Leftover ports" "Back" "${labels[@]}") || return 1
+  tm_menu_pick choice "Leftover ports" "Back" "${labels[@]}" || return 1
   if [[ "$choice" == "0" ]]; then
-    return 0
-  fi
-  if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#ids[@]} )); then
-    tm_warn "Unknown choice."
     return 0
   fi
   tm_menu_run tm_action_forward_delete --name "${ids[$((choice - 1))]}"
@@ -652,12 +668,12 @@ tm_menu_leftover_ports() {
 
 tm_menu_manage() {
   local -a names=() labels=() extras=()
-  local name="" choice="" picked=""
+  local name="" choice="" picked="" orphans=""
   while true; do
     names=()
-    labels=()
     extras=()
-    if tm_forward_orphan_lines | grep -q .; then
+    orphans=$(tm_forward_orphan_lines || true)
+    if [[ -n "$orphans" ]]; then
       extras+=("Leftover ports")
     fi
     extras+=("Maintenance")
@@ -665,17 +681,13 @@ tm_menu_manage() {
       [[ -n "$name" ]] || continue
       names+=("$name")
     done < <(tm_list_tunnels)
-    if [[ "${#names[@]}" -eq 0 ]]; then
-      tm_info "No tunnels are saved."
+    if [[ "${#names[@]}" -eq 0 && -z "$TM_MENU_NOTE" ]]; then
+      TM_MENU_NOTE="No tunnels are saved."
     fi
     labels=("${names[@]}" "${extras[@]}")
-    choice=$(tm_menu_choose "Manage Tunnels" "Back" "${labels[@]}") || return 1
+    tm_menu_pick choice "Manage Tunnels" "Back" "${labels[@]}" || return 1
     if [[ "$choice" == "0" ]]; then
       return 0
-    fi
-    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#labels[@]} )); then
-      tm_warn "Unknown choice."
-      continue
     fi
     if (( choice <= ${#names[@]} )); then
       tm_menu_tunnel "${names[$((choice - 1))]}"
@@ -685,7 +697,6 @@ tm_menu_manage() {
     case "$picked" in
       "Leftover ports") tm_menu_leftover_ports ;;
       "Maintenance") tm_menu_maintenance ;;
-      *) tm_warn "Unknown choice." ;;
     esac
   done
 }
@@ -698,20 +709,34 @@ tm_menu_bbr_label() {
   fi
 }
 
+tm_menu_update() {
+  local prefix=""
+  tm_menu_run tm_action_update
+  if [[ "$TM_MENU_STATUS" -ne 0 || "${TM_DRY_RUN:-0}" == "1" ]]; then
+    return 0
+  fi
+  prefix=$(tm_install_prefix) || return 0
+  if [[ -x "${prefix}/bin/tunnel-manager" ]]; then
+    unset TM_LIB_DIR TM_PREFIX
+    exec "${prefix}/bin/tunnel-manager" menu
+  fi
+}
+
 tm_menu() {
   local choice="" bbr_label=""
+  TM_MENU_FACE=1
   while true; do
     bbr_label=$(tm_menu_bbr_label)
-    choice=$(tm_menu_choose "" "Exit" \
+    tm_menu_pick choice "" "Exit" \
       "Configure a New Tunnel" \
       "Manage Tunnels" \
       "Update" \
       "Uninstall" \
-      "$bbr_label") || return 1
+      "$bbr_label" || return 1
     case "$choice" in
       1) tm_menu_configure ;;
       2) tm_menu_manage ;;
-      3) tm_menu_run tm_action_update ;;
+      3) tm_menu_update ;;
       4) tm_menu_uninstall ;;
       5)
         if [[ "$bbr_label" == "Disable BBR" ]]; then
@@ -720,8 +745,10 @@ tm_menu() {
           tm_menu_run tm_action_bbr_enable
         fi
         ;;
-      0) tm_info "Goodbye."; return 0 ;;
-      *) tm_warn "Unknown choice." ;;
+      *)
+        tm_info "Goodbye."
+        return 0
+        ;;
     esac
   done
 }

@@ -18,7 +18,6 @@ administer, and review every plan before confirming it.
 - Mix iptables and nftables in one apply. `ip6tables` is used only as the
   IPv6 companion of the iptables backend, for an IPv6 tunnel endpoint.
 - Forward TCP or UDP through a second proxy. Both protocols use firewall NAT.
-- Start GRE without an explicit no-encryption acknowledgement.
 - Change the default route while enabling or disabling BBR. BBR may set only
   `net.core.default_qdisc` and `net.ipv4.tcp_congestion_control`.
 - Include private keys in a backup unless `--include-keys` is set.
@@ -52,12 +51,11 @@ addresses must be different hosts in that subnet.
 
 ## Residual risk
 
-GRE is not confidential and not authenticated. UDP SNAT changes the source
-address of forwarded datagrams; that is required for the return path and is
-shown in the plan. A connected route for the tunnel prefix appears when the
-address is assigned. Host firewall policy outside the managed chains is left
-to the operator. `doctor` and `forward test` do not prove that an arbitrary
-UDP application works end to end.
+UDP SNAT changes the source address of forwarded datagrams. That is required
+for the return path and is shown in the plan. A connected route for the tunnel
+prefix appears when the address is assigned. Host firewall policy outside the
+managed chains is left to the operator. `doctor` and `forward test` do not
+prove that an arbitrary UDP application works end to end.
 
 ## Reporting a failed change
 

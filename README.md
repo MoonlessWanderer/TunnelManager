@@ -16,10 +16,6 @@ rules, and does not change the default route.
 - root for apply, restore, and service installation
 - Packages: `iproute2`, `iptables`, `nftables`, `iputils-ping`, `procps`
 
-GRE has no encryption and no authentication. Creating a GRE tunnel requires
-`--i-understand-no-encryption` or typing `GRE is not encrypted`. `--yes` does
-not skip that confirmation.
-
 ## Install
 
 On each Debian or Ubuntu server, one command downloads and installs the tool.
@@ -43,8 +39,10 @@ sudo tunnel-manager init --role iran --public-ip 203.0.113.10 --wan-iface eth0
 ```
 
 Use `--role foreign` on the other server. `install.sh` does not enable
-services and does not change the firewall. Enable boot persistence only after
-a dry-run looks right:
+services and does not change the firewall. Menu setup and `quick` enable
+`tunnel-manager-apply.service` when they save a tunnel, so saved tunnels and
+ports come back after a reboot. For tunnels made with other commands, or on a
+server set up by an older version, enable it once:
 
 ```bash
 sudo tunnel-manager service enable
@@ -73,7 +71,9 @@ On the Iran server, choose Configure a New Tunnel, then Iran. The menu fills
 this server's address. Enter the foreign address, choose plain port forward
 or GRE, and press Enter to accept a shown default. Port lines look like `443`
 or `443=2053`. An empty line finishes the list. A GRE tunnel with no ports
-is a tunnel only. Iran then prints one command for the foreign server.
+is a tunnel only. Before anything runs, the menu shows a summary, including
+that the setup is restored after reboot. Iran then prints one command for the
+foreign server.
 
 On the foreign server, choose Foreign and paste that command. A plain port
 forward does not create a tunnel there.
@@ -84,7 +84,7 @@ sudo tunnel-manager quick v1:gre:edge:203.0.113.10:203.0.113.20:10.200.0.1:10.20
 
 1. Configure a New Tunnel. Iran or foreign, then the setup above.
 2. Manage Tunnels. Lists saved tunnels. If none are saved, it says so. Choosing one tunnel shows only that tunnel's actions.
-3. Update downloads the main branch and reinstalls the program. Saved tunnels stay in place and services are not enabled.
+3. Update downloads the main branch and reinstalls the program. Saved tunnels and boot settings stay as they are, and the menu reopens on the new version.
 4. Uninstall asks once, then removes the program and everything it saved. Missing files are skipped. Other firewall rules stay in place.
 5. Enable BBR sets `fq` and `bbr` and keeps them after reboot. When BBR is already saved, the same item becomes Disable BBR. Disable restores the previous settings and does not turn BBR back on after reboot. Neither choice changes the default route.
 

@@ -21,8 +21,8 @@ tm_paths_init() {
   TM_SYSCTL_FILE="${TM_SYSCTL_FILE:-/etc/sysctl.d/99-tunnel-manager.conf}"
   TM_BBR_FILE="${TM_BBR_FILE:-/etc/sysctl.d/98-tunnel-manager-bbr.conf}"
   TM_BBR_MOD_FILE="${TM_BBR_MOD_FILE:-/etc/modules-load.d/tunnel-manager-bbr.conf}"
-  TM_BIN="${TM_BIN:-/usr/local/bin/tunnel-manager}"
-  TM_LIB_INSTALL="${TM_LIB_INSTALL:-/usr/local/lib/tunnel-manager}"
+  TM_BIN="${TM_BIN:-${TM_PREFIX:-/usr/local}/bin/tunnel-manager}"
+  TM_LIB_INSTALL="${TM_LIB_INSTALL:-${TM_PREFIX:-/usr/local}/lib/tunnel-manager}"
 }
 
 tm_init_runtime() {
@@ -30,7 +30,6 @@ tm_init_runtime() {
   tm_paths_init
   : "${TM_YES:=0}"
   : "${TM_DRY_RUN:=0}"
-  : "${TM_ALLOW_GRE:=0}"
   : "${TM_LOG_LEVEL:=info}"
   : "${TM_SSH_PORT:=22}"
   tm_assert_storage_roots

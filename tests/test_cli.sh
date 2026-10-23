@@ -6,7 +6,7 @@ tm_test_reset
 
 bin="${TM_REPO}/bin/tunnel-manager"
 version=$(bash "$bin" version)
-tm_expect_eq "version" "$version" "1.6.2"
+tm_expect_eq "version" "$version" "1.6.3"
 bash "$bin" help >/dev/null
 tm_pass "help exits successfully"
 
@@ -60,6 +60,66 @@ if [[ "$forbidden" -eq 0 ]]; then
   tm_pass "source does not flush firewalls or edit routes"
 else
   tm_fail "source contains a forbidden firewall or route command"
+fi
+
+TM_MENU_COLOR=0
+TM_MENU_NOTE="No tunnels are saved."
+menu_text=$(tm_menu_render "Manage Tunnels" "Back" "edge" "Maintenance")
+TM_MENU_NOTE=""
+if [[ "$menu_text" == *"Tunnel Manager"* && "$menu_text" == *"Manage Tunnels"* \
+  && "$menu_text" == *"No tunnels are saved."* && "$menu_text" == *"1  edge"* \
+  && "$menu_text" == *"2  Maintenance"* && "$menu_text" == *"0  Back"* \
+  && "$menu_text" != *$'\033'* && "$menu_text" != *"1.6.3"* ]]; then
+  tm_pass "menu screen is plain text when color is off"
+else
+  tm_fail "menu screen was not the plain layout"
+fi
+
+TM_MENU_COLOR=1
+menu_color=$(tm_menu_render "" "Exit" "Configure a New Tunnel" "Enable BBR")
+TM_MENU_COLOR=0
+if [[ "$menu_color" == *$'\033[36m'* && "$menu_color" == *"Tunnel Manager"* \
+  && "$menu_color" == *"1.6.3"* && "$menu_color" == *"Configure a New Tunnel"* \
+  && "$menu_color" == *"Enable BBR"* && "$menu_color" == *"Exit"* \
+  && "$menu_color" != *$'\033[31m'* && "$menu_color" != *"════"* ]]; then
+  tm_pass "menu screen uses a quiet accent and the version on the main page"
+else
+  tm_fail "menu screen accent or main page was wrong"
+fi
+
+idx=$(tm_menu_choice_index " 1 " 5)
+idx8=$(tm_menu_choice_index "08" 10)
+if [[ "$idx" == "1" && "$idx8" == "8" ]] && ! tm_menu_choice_index "99" 5 && ! tm_menu_choice_index "x" 5; then
+  tm_pass "menu accepts only a listed choice"
+else
+  tm_fail "menu choice check was wrong"
+fi
+
+face_line=$(tm_face_print INFO "Changes applied." 2>&1)
+warn_line=$(tm_face_print WARN "Port 443 is already forwarded." 2>&1)
+check_line=$(tm_face_print WARN "[WARN] ip_forward is off" 2>&1)
+face_info=$(TM_MENU_FACE=1 tm_info "kept in the log" 2>&1)
+plain_info=$(tm_info "stamped outside the menu" 2>&1)
+if [[ "$face_line" == "  Changes applied." && "$warn_line" == "  ! Port 443 is already forwarded." \
+  && "$check_line" == "  [WARN] ip_forward is off" && "$face_line" != *$'\033'* \
+  && "$face_info" == "  kept in the log" && "$plain_info" == *"INFO stamped outside the menu"* ]] \
+  && grep -q 'INFO kept in the log' "$TM_LOG_FILE"; then
+  tm_pass "menu messages stay one line and the log keeps timestamps"
+else
+  tm_fail "menu message layout was wrong"
+fi
+
+ports_label=$(tm_setup_ports_label "443,8443=2053")
+tm_expect_eq "port list reads as a sentence" "$ports_label" "443, 8443 -> 2053"
+
+tm_plan_reset
+tm_plan_add "Only step" "$(tm_shell_quote tm_noop)" tm_noop
+plan_text=$(tm_plan_show 2>&1)
+tm_plan_reset
+if [[ "$plan_text" == *"Planned changes (1 step):"* ]]; then
+  tm_pass "a one-step plan says step"
+else
+  tm_fail "a one-step plan was worded wrong: ${plan_text}"
 fi
 
 tm_finish

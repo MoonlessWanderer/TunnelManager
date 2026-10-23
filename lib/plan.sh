@@ -16,17 +16,11 @@ TM_PLAN_LOADED=1
 TM_PLAN_DESC=()
 TM_PLAN_CMD=()
 TM_PLAN_UNDO=()
-TM_PLAN_GRE=0
 
 tm_plan_reset() {
   TM_PLAN_DESC=()
   TM_PLAN_CMD=()
   TM_PLAN_UNDO=()
-  TM_PLAN_GRE=0
-}
-
-tm_plan_note_gre() {
-  TM_PLAN_GRE=1
 }
 
 tm_journal_path() {
@@ -141,15 +135,15 @@ tm_plan_add() {
 }
 
 tm_plan_show() {
-  local i
-  if [[ "${TM_PLAN_GRE:-0}" == "1" ]]; then
-    tm_warn "GRE tunnels have no encryption and no authentication. Traffic can be read or modified in transit."
-  fi
+  local i unit="steps"
   if [[ "${#TM_PLAN_DESC[@]}" -eq 0 ]]; then
     tm_info "No changes planned."
     return 0
   fi
-  tm_info "Planned changes (${#TM_PLAN_DESC[@]} steps):"
+  if [[ "${#TM_PLAN_DESC[@]}" -eq 1 ]]; then
+    unit="step"
+  fi
+  tm_info "Planned changes (${#TM_PLAN_DESC[@]} ${unit}):"
   for i in "${!TM_PLAN_DESC[@]}"; do
     tm_info "  $((i + 1)). ${TM_PLAN_DESC[$i]}"
   done
@@ -172,13 +166,6 @@ tm_plan_apply() {
   fi
   if tm_journal_exists; then
     tm_die "A rollback journal already exists. Run: tunnel-manager rollback"
-  fi
-  if [[ "${TM_PLAN_GRE:-0}" == "1" && "${TM_ALLOW_GRE:-0}" != "1" ]]; then
-    tm_gre_warning_text >&2
-    if ! tm_confirm_phrase "GRE is not encrypted" "Type 'GRE is not encrypted' to continue:"; then
-      tm_error "GRE was not applied. The confirmation phrase did not match."
-      return 2
-    fi
   fi
   if ! tm_confirm "Apply these changes?"; then
     tm_info "Aborted. No changes were made."

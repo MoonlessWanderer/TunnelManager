@@ -205,7 +205,7 @@ tm_action_update() {
   tm_plan_add "Snapshot the current installation in ${prefix}" \
     "$(tm_shell_quote tm_update_snapshot_undo)" \
     tm_update_snapshot_exec
-  tm_plan_add "Reinstall Tunnel Manager into ${prefix} without enabling services" \
+  tm_plan_add "Reinstall Tunnel Manager into ${prefix}. Saved tunnels and boot settings stay as they are." \
     "$(tm_shell_quote tm_update_install_undo)" \
     tm_update_install_exec
   tm_require_change_privileges

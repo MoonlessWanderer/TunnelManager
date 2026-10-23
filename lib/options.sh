@@ -31,7 +31,7 @@ tm_opts_parse() {
         shift
         ;;
       --i-understand-no-encryption)
-        _tm_parsed['gre_ack']=1
+        # Accepted for setup commands printed by older versions.
         shift
         ;;
       --include-keys)
@@ -79,11 +79,6 @@ tm_opts_bind_flags() {
     TM_DRY_RUN=1
   else
     TM_DRY_RUN=0
-  fi
-  if [[ "${_tm_bound['gre_ack']:-0}" == "1" ]]; then
-    TM_ALLOW_GRE=1
-  else
-    TM_ALLOW_GRE=0
   fi
   if [[ "${_tm_bound['verbose']:-0}" == "1" ]]; then
     TM_LOG_LEVEL=debug

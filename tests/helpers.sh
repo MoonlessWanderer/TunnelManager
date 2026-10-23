@@ -89,7 +89,6 @@ tm_test_reset() {
   export TM_ALLOW_NON_LINUX=1
   export TM_YES=0
   export TM_DRY_RUN=0
-  export TM_ALLOW_GRE=0
   export TM_LOG_LEVEL=info
   export TM_SSH_PORT=22
   export TM_FW_BACKEND=auto

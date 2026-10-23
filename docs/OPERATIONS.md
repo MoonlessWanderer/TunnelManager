@@ -54,7 +54,7 @@ TCP and UDP. The menu setup command is IPv4 only.
 sudo tunnel-manager tunnel create --name gre6 --type gre \
   --local-public-ip 2001:db8::10 --remote-public-ip 2001:db8::20 \
   --local-tunnel-ip 2001:db8:1::1 --remote-tunnel-ip 2001:db8:1::2 \
-  --wan-iface eth0 --i-understand-no-encryption
+  --wan-iface eth0
 ```
 
 Update the installed program from the menu or with:
@@ -137,11 +137,10 @@ sudo tunnel-manager --dry-run tunnel create --name gre1 --type gre \
 sudo tunnel-manager tunnel create --name gre1 --type gre \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.5 --remote-tunnel-ip 10.200.0.6 \
-  --wan-iface eth0 --i-understand-no-encryption
+  --wan-iface eth0
 ```
 
-Read the plan before confirming. GRE traffic can be read and modified in
-transit.
+Read the plan before confirming.
 
 ## Menu
 
@@ -158,7 +157,8 @@ transit.
    - Choosing a tunnel offers details, test, TCP ports, and delete. GRE also
      offers restart.
    - Maintenance has status, troubleshoot, backup, restore, apply, dry-run, and rollback.
-3. Update reinstalls the program and keeps saved tunnels.
+3. Update reinstalls the program, keeps saved tunnels and boot settings, and
+   reopens the menu on the new version.
 4. Uninstall asks once, then removes the program, saved tunnels, and logs. Missing paths are ignored. Other firewall rules are not flushed.
 5. Enable BBR, or Disable BBR when those boot settings are already saved.
    Enable sets `net.core.default_qdisc=fq` and
@@ -168,6 +168,14 @@ transit.
 
 ## Reboot
 
-After `service enable`, `tunnel-manager-apply.service` runs `apply --yes` on
-boot. That reconciles saved state. It does not prompt. An interface that is
-already up is left up if a later step fails.
+`tunnel-manager-apply.service` runs `apply --yes` on boot. That reconciles
+saved state. It does not prompt. An interface that is already up is left up if
+a later step fails.
+
+Menu setup, adding ports from the menu, and `quick` enable the unit when they
+save a tunnel. The setup summary says so before anything runs. A server set up
+by an older version, or with other commands, needs it once:
+
+```bash
+sudo tunnel-manager service enable
+```

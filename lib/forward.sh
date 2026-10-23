@@ -245,7 +245,7 @@ tm_action_forward_add() {
     tm_die "Forward ${name} already exists."
   fi
   decision=$(tm_fw_snat_decision "$snat" "$dest_ip" "$source_ip" "$dest_ip") || tm_die "Cannot decide SNAT."
-  if [[ "$dest_ip" != "$source_ip" ]]; then
+  if [[ "$dest_ip" != "$source_ip" && "$dest_ip" != "${tun[TM_REMOTE_TUNNEL_IP]:-}" ]]; then
     tm_warn "No route will be added for ${dest_ip}. It must already be reachable, usually through the tunnel subnet."
   fi
   tm_plan_require_clear_journal
@@ -373,7 +373,7 @@ tm_forward_edit_exec() {
 tm_action_forward_list() {
   local name proto
   local -A row=()
-  if ! tm_list_forwards | grep -q .; then
+  if [[ -z "$(tm_list_forwards)" ]]; then
     tm_info "No forwards are saved."
     return 0
   fi

@@ -17,7 +17,7 @@ tm_usage() {
 Tunnel Manager ${TM_VERSION}
 Forward TCP ports, or build a GRE tunnel, between an Iran server and a foreign server.
 GRE may use IPv4 or IPv6 endpoints. The menu and the setup command use IPv4.
-Port forwarding is IPv4 only. GRE has no encryption.
+Port forwarding is IPv4 only.
 
 Safety:
   The default route is never changed.
@@ -45,7 +45,7 @@ Usage:
   tunnel-manager tunnel create --name NAME --type forward|gre \\
       --local-public-ip IP --remote-public-ip IP \\
       --local-tunnel-ip IP --remote-tunnel-ip IP --wan-iface IFACE \\
-      [--cidr 30] [--mtu N] [--i-understand-no-encryption]
+      [--cidr 30] [--mtu N]
   tunnel-manager tunnel up|down|restart|test|show --name NAME
   tunnel-manager tunnel list
   tunnel-manager tunnel delete --name NAME [--yes]
@@ -86,8 +86,5 @@ Global flags:
   --yes       Apply without an extra confirmation prompt.
   --dry-run   Print the plan and do not change the system.
   --verbose   Log the commands that pass the safety check.
-
-GRE tunnels require --i-understand-no-encryption or the exact phrase
-"GRE is not encrypted". --yes does not skip that confirmation.
 EOF
 }

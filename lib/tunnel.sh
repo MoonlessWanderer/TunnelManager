@@ -178,7 +178,7 @@ tm_tunnel_start_exec() {
     return 1
   fi
   if [[ "${row[TM_GRE_ACK]}" != "yes" ]]; then
-    tm_error "Refusing to start GRE tunnel ${name} without a stored encryption acknowledgement."
+    tm_error "Refusing to start GRE tunnel ${name}; its saved state is incomplete."
     return 1
   fi
   tm_gre_up_exec "$name" "${row[TM_LOCAL_PUBLIC_IP]}" "${row[TM_REMOTE_PUBLIC_IP]}" \
@@ -210,21 +210,6 @@ tm_tunnel_stop_exec() {
   tm_gre_down_exec "$name" || return 1
 }
 
-tm_tunnel_require_gre_ack() {
-  if [[ "${TM_DRY_RUN:-0}" == "1" ]]; then
-    return 0
-  fi
-  if [[ "${TM_ALLOW_GRE:-0}" == "1" ]]; then
-    return 0
-  fi
-  tm_gre_warning_text >&2
-  if tm_confirm_phrase "GRE is not encrypted" "Type 'GRE is not encrypted' to continue:"; then
-    return 0
-  fi
-  tm_error "GRE was not created. The confirmation phrase did not match."
-  return 1
-}
-
 tm_action_tunnel_create() {
   local -A opt=()
   local -A req=()
@@ -252,9 +237,6 @@ tm_action_tunnel_create() {
   fi
   tm_plan_require_clear_journal
   tm_plan_reset
-  if [[ "${req[type]}" == "gre" ]]; then
-    tm_plan_note_gre
-  fi
   tm_plan_add "Prepare Tunnel Manager directories" \
     "$(tm_shell_quote tm_noop)" \
     tm_ensure_tree
@@ -427,7 +409,7 @@ tm_action_tunnel_restart() {
 tm_action_tunnel_list() {
   local name
   local -A row=()
-  if ! tm_list_tunnels | grep -q .; then
+  if [[ -z "$(tm_list_tunnels)" ]]; then
     tm_info "No tunnels are saved."
     return 0
   fi

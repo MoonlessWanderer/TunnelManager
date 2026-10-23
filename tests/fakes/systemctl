@@ -2,17 +2,32 @@
 set -euo pipefail
 ROOT="${TM_FAKE_ROOT:?}"
 LOG="${ROOT}/systemctl.log"
+STATE="${ROOT}/systemctl.enabled"
 mkdir -p -- "$ROOT"
 printf '%s\n' "$*" >>"$LOG"
+verb=""
 for arg in "$@"; do
   case "$arg" in
     ssh|sshd|ssh.service|sshd.service|networking|networking.service|NetworkManager|firewalld)
       printf '%s\n' "forbidden unit ${arg}" >>"$LOG"
       exit 99
       ;;
+    --*) ;;
+    *) [[ -n "$verb" ]] || verb="$arg" ;;
   esac
 done
-if [[ "${1:-}" == "is-active" || "${2:-}" == "is-active" ]]; then
-  printf '%s\n' "inactive"
-fi
+case "$verb" in
+  is-active)
+    printf '%s\n' "inactive"
+    ;;
+  is-enabled)
+    [[ -f "$STATE" ]] || exit 1
+    ;;
+  enable)
+    : >"$STATE"
+    ;;
+  disable)
+    rm -f -- "$STATE"
+    ;;
+esac
 exit 0

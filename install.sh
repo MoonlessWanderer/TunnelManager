@@ -161,7 +161,6 @@ if [[ "$SKIP_SYSTEMD" -eq 0 && -d /etc/systemd/system && -f "$local_sh" ]]; then
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
   fi
-  printf '%s\n' "Systemd units were installed but not enabled."
 fi
 
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -173,8 +172,6 @@ fi
 
 printf '%s\n' "Installed Tunnel Manager into ${PREFIX}."
 printf '%s\n' "Open the menu with: sudo ${BIN_DEST}/tm"
-printf '%s\n' "Next: sudo ${BIN_DEST}/tunnel-manager init --role iran|foreign ..."
-printf '%s\n' "Services stay disabled until: sudo ${BIN_DEST}/tunnel-manager service enable"
 if [[ "$ASSUME_YES" -eq 0 ]]; then
   printf '%s\n' "No firewall rules, tunnels, or routes were changed."
 fi

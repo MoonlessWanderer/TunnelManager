@@ -97,8 +97,8 @@ text=$(TM_DRY_RUN=1 tm_action_tunnel_create --name gre1 --type gre \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.5 --remote-tunnel-ip 10.200.0.6 \
   --wan-iface eth0 --dry-run 2>&1 || true)
-if [[ "$text" == *"no encryption"* && "$text" == *"default route is not modified"* && "$text" == *"not flushed"* && "$text" == *"Dry-run"* ]]; then
-  tm_pass "GRE dry-run shows the warning and the plan"
+if [[ "$text" != *"no encryption"* && "$text" != *"GRE is not encrypted"* && "$text" == *"default route is not modified"* && "$text" == *"not flushed"* && "$text" == *"Dry-run"* ]]; then
+  tm_pass "GRE dry-run shows the plan"
 else
   tm_fail "GRE dry-run output was incomplete: ${text}"
 fi
@@ -118,7 +118,7 @@ text6=$(TM_DRY_RUN=1 tm_action_tunnel_create --name gre6 --type gre \
   --local-public-ip 2001:db8::11 --remote-public-ip 2001:db8::21 \
   --local-tunnel-ip 2001:db8:3::1 --remote-tunnel-ip 2001:db8:3::2 \
   --wan-iface eth0 --dry-run 2>&1 || true)
-if [[ "$text6" == *"ip6gre"* && "$text6" == *"no encryption"* && ! -f "${TM_ETC}/tunnels/gre6.conf" ]]; then
+if [[ "$text6" == *"ip6gre"* && "$text6" != *"no encryption"* && ! -f "${TM_ETC}/tunnels/gre6.conf" ]]; then
   tm_pass "ipv6 GRE dry-run names ip6gre and does not write state"
 else
   tm_fail "ipv6 GRE dry-run was incomplete"
@@ -167,7 +167,6 @@ quick_text=$(tm_action_quick --dry-run --i-understand-no-encryption --token \
   'v1:gre:link:203.0.113.10:203.0.113.31:10.200.0.1:10.200.0.2:30' 2>&1)
 set -e
 TM_DRY_RUN=0
-TM_ALLOW_GRE=0
 if [[ "$quick_text" == *"Dry-run"* && "$quick_text" == *"Start gre"* ]] \
   && [[ ! -f "${TM_ETC}/tunnels/link.conf" ]]; then
   tm_pass "foreign quick dry-run plans GRE and writes nothing"

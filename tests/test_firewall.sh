@@ -76,14 +76,14 @@ tm_split_saved_rule() {
 }
 tm_expect_ok "saved rule splits when IFS has no space" tm_split_saved_rule
 
-printf '%s\n' "CHAIN nat TM_POSTROUTING" >>"${TM_FAKE_ROOT}/iptables.state"
-printf 'RULE\tnat\tTM_POSTROUTING\t%s\n' \
-  '-d 203.0.113.31/32 -p tcp -m tcp --dport 443 -m comment --comment "tm:tcp:p443:snat" -j SNAT --to-source 203.0.113.10' \
-  >>"${TM_FAKE_ROOT}/iptables.state"
-printf 'RULE\tfilter\tTM_FORWARD\t%s\n' \
-  '-s 203.0.113.31/32 -p tcp -m tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "tm:tcp:p443:fwdret" -j ACCEPT' \
-  >>"${TM_FAKE_ROOT}/iptables.state"
-printf '%s\n' "CHAIN filter TM_FORWARD" >>"${TM_FAKE_ROOT}/iptables.state"
+{
+  printf '%s\n' "CHAIN nat TM_POSTROUTING"
+  printf 'RULE\tnat\tTM_POSTROUTING\t%s\n' \
+    '-d 203.0.113.31/32 -p tcp -m tcp --dport 443 -m comment --comment "tm:tcp:p443:snat" -j SNAT --to-source 203.0.113.10'
+  printf 'RULE\tfilter\tTM_FORWARD\t%s\n' \
+    '-s 203.0.113.31/32 -p tcp -m tcp --sport 443 -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "tm:tcp:p443:fwdret" -j ACCEPT'
+  printf '%s\n' "CHAIN filter TM_FORWARD"
+} >>"${TM_FAKE_ROOT}/iptables.state"
 tm_expect_ok "saved snat with /32 can be deleted" \
   tm_iptables_delete_comment nat TM_POSTROUTING tm:tcp:p443:snat
 tm_expect_ok "saved forward return with /32 can be deleted" \

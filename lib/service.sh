@@ -13,17 +13,18 @@ fi
 TM_SERVICE_LOADED=1
 
 tm_template_dir() {
-  local here root
+  local here root dir
   here=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   root=$(cd -P "${here}/.." && pwd)
-  if [[ -d "${root}/systemd" ]]; then
-    printf '%s\n' "${root}/systemd"
-    return 0
-  fi
-  if [[ -d /usr/local/share/tunnel-manager/systemd ]]; then
-    printf '%s\n' /usr/local/share/tunnel-manager/systemd
-    return 0
-  fi
+  # An installed lib lives in PREFIX/lib/tunnel-manager, so PREFIX/lib/systemd
+  # is the system unit directory, not ours. Look for the template itself.
+  for dir in "${root}/systemd" "${root}/../share/tunnel-manager/systemd" \
+    /usr/local/share/tunnel-manager/systemd; do
+    if [[ -f "${dir}/tunnel-manager-apply.service.in" ]]; then
+      (cd -P "$dir" && pwd)
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -34,11 +35,9 @@ tm_systemd_dir() {
 tm_systemd_dir_ok() {
   local dir parent norm
   dir=$(tm_systemd_dir)
-  if [[ "$dir" == "/etc/systemd/system" ]]; then
-    return 0
-  fi
   if [[ "${TM_TEST_MODE:-0}" != "1" ]]; then
-    return 1
+    [[ "$dir" == "/etc/systemd/system" ]]
+    return $?
   fi
   norm=$(tm_normalize_path "$dir") || return 1
   parent=$(dirname -- "$TM_ETC")
@@ -86,7 +85,7 @@ tm_action_service_enable() {
   tm_opts_bind_flags opt
   tm_plan_require_clear_journal
   tm_plan_reset
-  tm_plan_add "Install Tunnel Manager systemd units and enable boot apply" \
+  tm_plan_add "Restore saved tunnels and ports after reboot (tunnel-manager-apply.service)" \
     "$(tm_shell_quote tm_service_disable_exec)" \
     tm_service_enable_exec
   tm_require_change_privileges
@@ -97,10 +96,19 @@ tm_service_enable_exec() {
   tm_service_install_units_exec || return 1
   if tm_use_systemd; then
     tm_must systemctl daemon-reload || return 1
-    tm_must systemctl enable tunnel-manager-apply.service || return 1
+    tm_must systemctl enable --quiet tunnel-manager-apply.service || return 1
   else
     tm_warn "systemd is not running. Unit files were written but not enabled."
   fi
+}
+
+tm_service_boot_enabled() {
+  local saved="${TM_DRY_RUN:-0}" status=0
+  tm_use_systemd || return 1
+  TM_DRY_RUN=0
+  tm_run_quiet systemctl is-enabled --quiet tunnel-manager-apply.service >/dev/null 2>&1 || status=$?
+  TM_DRY_RUN="$saved"
+  return "$status"
 }
 
 tm_service_disable_exec() {

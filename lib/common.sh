@@ -13,7 +13,7 @@ if [[ -n "${TM_COMMON_LOADED:-}" ]]; then
 fi
 TM_COMMON_LOADED=1
 
-TM_VERSION="1.6.2"
+TM_VERSION="1.6.3"
 
 tm_version() {
   printf '%s\n' "$TM_VERSION"
@@ -31,6 +31,32 @@ tm_redact() {
   printf '%s\n' "$redacted"
 }
 
+tm_styled() {
+  [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" && -t "$1" ]]
+}
+
+# Quiet one-line form used while the menu runs.
+# The log file always keeps the timestamped line.
+tm_face_print() {
+  local level="$1"
+  local msg="$2"
+  local open="" close="" mark=""
+  if [[ "$level" == "WARN" || "$level" == "ERROR" ]] && [[ "$msg" != "["* ]]; then
+    mark="! "
+  fi
+  if tm_styled 2; then
+    if [[ "$level" == "WARN" || "$level" == "ERROR" ]]; then
+      open=$'\033[1m'
+    elif [[ "$msg" == "RUN: "* ]]; then
+      open=$'\033[2m'
+    fi
+    if [[ -n "$open" ]]; then
+      close=$'\033[0m'
+    fi
+  fi
+  printf '  %s%s%s%s\n' "$open" "$mark" "$msg" "$close" >&2
+}
+
 tm_log() {
   local level="$1"
   shift
@@ -45,7 +71,11 @@ tm_log() {
       ;;
     *)
       # Logs stay on stderr so command stdout can be captured safely.
-      printf '%s\n' "$line" >&2
+      if [[ "${TM_MENU_FACE:-0}" == "1" ]]; then
+        tm_face_print "$level" "$msg"
+      else
+        printf '%s\n' "$line" >&2
+      fi
       ;;
   esac
   if [[ -n "${TM_LOG_FILE:-}" ]]; then
@@ -95,48 +125,74 @@ tm_shell_quote() {
   printf '%q ' "$@"
 }
 
+# Prompts read the controlling terminal. In test mode a script can stand in
+# for it: TM_TEST_TTY_FD is an open input descriptor, TM_TEST_TTY_OUT a file.
+tm_tty_scripted() {
+  [[ "${TM_TEST_MODE:-0}" == "1" && -n "${TM_TEST_TTY_FD:-}" ]]
+}
+
+tm_tty_ready() {
+  tm_tty_scripted || [[ -r /dev/tty ]]
+}
+
+tm_tty_printf() {
+  local out=/dev/tty
+  if tm_tty_scripted; then
+    out="${TM_TEST_TTY_OUT:-/dev/null}"
+  fi
+  # shellcheck disable=SC2059
+  printf "$@" >>"$out"
+}
+
+tm_tty_read() {
+  local -n _tm_tty_line=$1
+  if tm_tty_scripted; then
+    read -r -u "$TM_TEST_TTY_FD" _tm_tty_line
+  else
+    read -r _tm_tty_line </dev/tty
+  fi
+}
+
 tm_confirm() {
   local prompt="$1"
-  local reply=""
+  local reply="" lead=""
   if [[ "${TM_YES:-0}" == "1" ]]; then
     return 0
   fi
-  if [[ ! -r /dev/tty ]]; then
+  if ! tm_tty_ready; then
     tm_error "Confirmation required but no terminal is available. Re-run with --yes to confirm."
     return 1
   fi
-  read -r -p "$prompt [y/N] " reply </dev/tty || return 1
+  if [[ "${TM_MENU_FACE:-0}" == "1" ]]; then
+    lead="  "
+  fi
+  tm_tty_printf '%s%s [y/N] ' "$lead" "$prompt"
+  tm_tty_read reply || return 1
   case "$reply" in
     y|Y|yes|YES) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-tm_confirm_phrase() {
-  local expected="$1"
-  local prompt="$2"
-  local reply=""
-  if [[ ! -r /dev/tty ]]; then
-    tm_error "Type the confirmation phrase on a terminal, or pass the documented flag."
-    return 1
-  fi
-  read -r -p "$prompt " reply </dev/tty || return 1
-  [[ "$reply" == "$expected" ]]
-}
-
 tm_prompt() {
   local -n _tm_dest=$1
   local prompt="$2"
   local default="${3:-}"
-  local reply=""
-  if [[ ! -r /dev/tty ]]; then
+  local reply="" lead=""
+  if ! tm_tty_ready; then
     tm_die "A terminal is required for interactive input."
   fi
+  if [[ "${TM_MENU_FACE:-0}" == "1" ]]; then
+    lead="  "
+  fi
   if [[ -n "$default" ]]; then
-    read -r -p "$prompt [$default]: " reply </dev/tty || return 1
-    reply="${reply:-$default}"
+    tm_tty_printf '%s%s [%s]: ' "$lead" "$prompt" "$default"
   else
-    read -r -p "$prompt: " reply </dev/tty || return 1
+    tm_tty_printf '%s%s: ' "$lead" "$prompt"
+  fi
+  tm_tty_read reply || return 1
+  if [[ -n "$default" ]]; then
+    reply="${reply:-$default}"
   fi
   _tm_dest="$reply"
 }
