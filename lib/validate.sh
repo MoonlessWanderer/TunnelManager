@@ -76,20 +76,12 @@ tm_valid_tunnel_prefix() {
   return 0
 }
 
-tm_valid_keepalive() {
-  local k="$1"
-  [[ "$k" =~ ^[0-9]+$ ]] || return 1
-  [[ "$k" =~ ^0[0-9]+$ ]] && return 1
-  ((k >= 0 && k <= 120)) || return 1
-  return 0
-}
-
 tm_valid_tunnel_name() {
   local name="$1"
   [[ "$name" =~ ^[a-z][a-z0-9-]{0,11}$ ]] || return 1
   [[ "$name" == *- || "$name" == *--* ]] && return 1
   case "$name" in
-    tm|gre|wg|all|none|default|input|forward|output) return 1 ;;
+    tm|gre|all|none|default|input|forward|output) return 1 ;;
   esac
   return 0
 }
@@ -146,35 +138,6 @@ tm_valid_l4_proto() {
 tm_valid_snat_mode() {
   case "$1" in
     auto|always|never) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-tm_valid_wg_key() {
-  [[ "$1" =~ ^[A-Za-z0-9+/]{43}=$ ]]
-}
-
-# Pull a WireGuard key out of pasted text. Logs hide keys as [REDACTED-KEY],
-# so that placeholder is rejected instead of being stored.
-tm_normalize_wg_key() {
-  local key="$1"
-  key=${key//$'\r'/}
-  key=${key//$'\n'/}
-  if [[ "$key" == *"[REDACTED-KEY]"* || "$key" == *REDACTED-KEY* ]]; then
-    tm_error "That text is a log placeholder, not a key."
-    return 1
-  fi
-  if [[ "$key" =~ ([A-Za-z0-9+/]{43}=) ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
-    return 0
-  fi
-  tm_error "A WireGuard public key is 44 characters and ends with =."
-  return 1
-}
-
-tm_valid_bool_word() {
-  case "$1" in
-    yes|no) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -469,11 +432,4 @@ tm_port_is_protected() {
     fi
   fi
   return 1
-}
-
-tm_default_route_cidr() {
-  case "$1" in
-    0.0.0.0/0|::/0) return 0 ;;
-    *) return 1 ;;
-  esac
 }

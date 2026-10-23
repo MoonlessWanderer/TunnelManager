@@ -69,7 +69,7 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
 fi
 
 if [[ "$PURGE_STATE" -eq 1 && "$(id -u)" -ne 0 && "${TM_TEST_MODE:-0}" != "1" ]]; then
-  printf '%s\n' "Refusing to remove saved tunnels and keys without root." >&2
+  printf '%s\n' "Refusing to remove saved tunnels without root." >&2
   exit 1
 fi
 

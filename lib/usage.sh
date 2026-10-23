@@ -49,7 +49,6 @@ Usage:
   tunnel-manager tunnel up|down|restart|test|show --name NAME
   tunnel-manager tunnel list
   tunnel-manager tunnel delete --name NAME [--yes]
-  tunnel-manager tunnel export-peer --name NAME --output FILE
   tunnel-manager forward add --name NAME --proto tcp|udp --listen-port PORT \\
       --dest-ip IP [--dest-port PORT] [--listen-ip IP] [--source-ip IP]
       [--tunnel NAME] [--ingress-iface IFACE] [--snat auto|always|never]
@@ -57,8 +56,8 @@ Usage:
   tunnel-manager forward delete --name NAME [--yes]
   tunnel-manager forward list
   tunnel-manager forward test --name NAME
-  tunnel-manager backup create --output FILE [--include-keys]
-  tunnel-manager backup restore --file FILE [--include-keys] [--dry-run] [--yes]
+  tunnel-manager backup create --output FILE
+  tunnel-manager backup restore --file FILE [--dry-run] [--yes]
   tunnel-manager backup list
   tunnel-manager service enable|disable|status [--yes]
   tunnel-manager update [--dry-run] [--yes]

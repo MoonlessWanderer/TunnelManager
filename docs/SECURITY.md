@@ -9,7 +9,6 @@ administer, and review every plan before confirming it.
 - Change the default route or install `0.0.0.0/0` / `::/0`.
 - Overwrite a sysctl drop-in or BBR module file it did not write.
 - Set `rp_filter` on `all` or `default`.
-- Edit `/etc/haproxy/haproxy.cfg` or run HAProxy.
 - Bind or DNAT the SSH port recorded in the host config or in `SSH_CONNECTION`.
 - Add an SSH accept rule, or stop `ssh` / `sshd`.
 - Source state files.
@@ -20,18 +19,14 @@ administer, and review every plan before confirming it.
 - Forward TCP or UDP through a second proxy. Both protocols use firewall NAT.
 - Change the default route while enabling or disabling BBR. BBR may set only
   `net.core.default_qdisc` and `net.ipv4.tcp_congestion_control`.
-- Include private keys in a backup unless `--include-keys` is set.
 
 ## Setup command
 
 The Iran server prints `tunnel-manager quick` plus one token. The token
 contains the tunnel type, name, public addresses, and GRE inner addresses.
-It contains no key. The foreign server checks that the foreign address is
-configured locally before it creates GRE. A plain forward token does not
-create a tunnel on the foreign server.
-
-Logs still replace 43-character base64 strings with `[REDACTED-KEY]`. The
-plan prints descriptions rather than command argv.
+The foreign server checks that the foreign address is configured locally
+before it creates GRE. A plain forward token does not create a tunnel on the
+foreign server. The plan prints descriptions rather than command argv.
 
 ## Firewall interaction
 
@@ -44,8 +39,8 @@ another firewall.
 ## Input checks
 
 Names, addresses, ports, MTU, prefixes, and state values are checked before a
-plan is built. State values may contain a path slash and may not contain
-`..`, command substitution, spaces, or quotes. Duplicate listen tuples are
+plan is built. State values hold only letters, digits, `.`, `:`, `_`, and
+`-`, and may not contain `..`. Duplicate listen tuples are
 rejected. Tunnel prefixes are `/24` through `/31`, and the two tunnel
 addresses must be different hosts in that subnet.
 

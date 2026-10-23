@@ -29,6 +29,19 @@ if (
 else
   tm_pass "dotdot value is rejected"
 fi
+for value in /etc/x a=b a+b a@b a,b; do
+  printf 'TM_HOST_ROLE=%s\n' "$value" >"$bad"
+  if (
+    declare -A row=()
+    tm_kv_read "$bad" row
+  ); then
+    tm_fail "state value ${value} was accepted"
+  else
+    tm_pass "state value ${value} is rejected"
+  fi
+done
+printf 'TM_UNKNOWN_KEY=1\n' >"$bad"
+tm_expect_fail "unknown state key is rejected" tm_kv_read "$bad" _ignored
 
 good="${TM_ETC}/host.conf"
 mkdir -p -- "$TM_ETC"
@@ -50,8 +63,8 @@ tm_eval_argv "$encoded" argv
 tm_expect_eq "quoted payload stays literal" "${argv[1]}" '$(touch pwned)'
 
 tm_expect_fail "/etc/passwd is not mutable" tm_path_is_mutable /etc/passwd
-tm_expect_fail "wireguard config is not tunnel manager state" tm_path_is_mutable "${TM_TEST_ROOT}/wireguard/tm-edge.conf"
-tm_expect_fail "foreign wireguard config is not mutable" tm_path_is_mutable "${TM_TEST_ROOT}/wireguard/wg0.conf"
+tm_expect_fail "a tm- file outside the state tree is not mutable" tm_path_is_mutable "${TM_TEST_ROOT}/other/tm-edge.conf"
+tm_expect_fail "another program's config is not mutable" tm_path_is_mutable "${TM_TEST_ROOT}/other/app.conf"
 
 mkdir -p -- "$TM_ETC/real"
 rm -rf -- "$TM_ETC/alias"

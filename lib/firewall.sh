@@ -393,10 +393,6 @@ tm_iptables_l4_apply_exec() {
     -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$c_ret" -j ACCEPT || return 1
 }
 
-tm_iptables_udp_apply_exec() {
-  tm_iptables_l4_apply_exec udp "$@"
-}
-
 tm_iptables_l4_delete_exec() {
   local proto="$1"
   local name="$2"
@@ -408,34 +404,18 @@ tm_iptables_l4_delete_exec() {
   tm_iptables_gc || return 1
 }
 
-tm_iptables_udp_delete_exec() {
-  tm_iptables_l4_delete_exec udp "$1"
-}
-
 tm_iptables_input_apply_exec() {
-  local kind="$1"
-  local name="$2"
-  local iface="$3"
-  local port="${4:-}"
-  local comment
-  comment=$(tm_fw_comment "${kind}:${name}:input")
+  local name="$1"
+  local iface="$2"
   tm_iptables_ensure_base || return 1
-  if [[ "$kind" == "gre" ]]; then
-    tm_iptables_add_if_missing \
-      iptables -t filter -A TM_INPUT -i "$iface" -p gre \
-      -m comment --comment "$comment" -j ACCEPT
-  else
-    tm_iptables_add_if_missing \
-      iptables -t filter -A TM_INPUT -i "$iface" -p udp --dport "$port" \
-      -m conntrack --ctstate NEW,ESTABLISHED \
-      -m comment --comment "$comment" -j ACCEPT
-  fi
+  tm_iptables_add_if_missing \
+    iptables -t filter -A TM_INPUT -i "$iface" -p gre \
+    -m comment --comment "$(tm_fw_comment "gre:${name}:input")" -j ACCEPT
 }
 
 tm_iptables_input_delete_exec() {
-  local kind="$1"
-  local name="$2"
-  tm_iptables_delete_comment filter TM_INPUT "$(tm_fw_comment "${kind}:${name}:input")" || return 1
+  local name="$1"
+  tm_iptables_delete_comment filter TM_INPUT "$(tm_fw_comment "gre:${name}:input")" || return 1
   tm_iptables_gc || return 1
 }
 
@@ -541,10 +521,6 @@ tm_nft_l4_apply_exec() {
   fi
 }
 
-tm_nft_udp_apply_exec() {
-  tm_nft_l4_apply_exec udp "$@"
-}
-
 tm_nft_l4_delete_exec() {
   local proto="$1"
   local name="$2"
@@ -555,33 +531,20 @@ tm_nft_l4_delete_exec() {
   tm_nft_delete_comment forward "$(tm_fw_comment "${proto}:${name}:fwdret")" || return 1
 }
 
-tm_nft_udp_delete_exec() {
-  tm_nft_l4_delete_exec udp "$1"
-}
-
 tm_nft_input_apply_exec() {
-  local kind="$1"
-  local name="$2"
-  local iface="$3"
-  local port="${4:-}"
-  local comment
-  comment=$(tm_fw_comment "${kind}:${name}:input")
+  local name="$1"
+  local iface="$2"
   tm_nft_ensure_base || return 1
   if [[ "${TM_NFT_FILTER_OK:-0}" != "1" ]]; then
-    tm_warn "Skipped ${kind} input allow because a filter hook is owned by another firewall."
+    tm_warn "Skipped the GRE input allow because a filter hook is owned by another firewall."
     return 0
   fi
-  if [[ "$kind" == "gre" ]]; then
-    tm_nft_add_rule input "$comment" iifname "$iface" gre accept
-  else
-    tm_nft_add_rule input "$comment" iifname "$iface" udp dport "$port" accept
-  fi
+  tm_nft_add_rule input "$(tm_fw_comment "gre:${name}:input")" iifname "$iface" meta l4proto gre accept
 }
 
 tm_nft_input_delete_exec() {
-  local kind="$1"
-  local name="$2"
-  tm_nft_delete_comment input "$(tm_fw_comment "${kind}:${name}:input")"
+  local name="$1"
+  tm_nft_delete_comment input "$(tm_fw_comment "gre:${name}:input")"
 }
 
 tm_fw_l4_apply_exec() {
@@ -600,10 +563,6 @@ tm_fw_l4_apply_exec() {
   esac
 }
 
-tm_fw_udp_apply_exec() {
-  tm_fw_l4_apply_exec udp "$@"
-}
-
 tm_fw_l4_delete_exec() {
   local proto="$1"
   local name="$2"
@@ -615,10 +574,6 @@ tm_fw_l4_delete_exec() {
     nft) tm_nft_l4_delete_exec "$proto" "$name" ;;
     *) return 1 ;;
   esac
-}
-
-tm_fw_udp_delete_exec() {
-  tm_fw_l4_delete_exec udp "$1"
 }
 
 tm_fw_forward_delete_exec() {
@@ -669,60 +624,49 @@ tm_ip6tables_input_gc() {
 }
 
 tm_ip6tables_input_apply_exec() {
-  local kind="$1"
-  local name="$2"
-  local iface="$3"
-  local port="${4:-}"
-  local comment
-  comment=$(tm_fw_comment "${kind}:${name}:input")
+  local name="$1"
+  local iface="$2"
   tm_ip6tables_input_ensure || return 1
-  if [[ "$kind" == "gre" ]]; then
-    tm_iptables_add_if_missing \
-      ip6tables -t filter -A TM_INPUT -i "$iface" -p gre \
-      -m comment --comment "$comment" -j ACCEPT
-  else
-    tm_iptables_add_if_missing \
-      ip6tables -t filter -A TM_INPUT -i "$iface" -p udp --dport "$port" \
-      -m conntrack --ctstate NEW,ESTABLISHED \
-      -m comment --comment "$comment" -j ACCEPT
-  fi
+  tm_iptables_add_if_missing \
+    ip6tables -t filter -A TM_INPUT -i "$iface" -p gre \
+    -m comment --comment "$(tm_fw_comment "gre:${name}:input")" -j ACCEPT
 }
 
 tm_ip6tables_input_delete_exec() {
-  local kind="$1"
-  local name="$2"
-  tm_ip6tables_input_delete_comment "$(tm_fw_comment "${kind}:${name}:input")" || return 1
+  local name="$1"
+  tm_ip6tables_input_delete_comment "$(tm_fw_comment "gre:${name}:input")" || return 1
   tm_ip6tables_input_gc || return 1
 }
 
 tm_fw_input_apply_exec() {
-  local backend family
-  family="${5:-4}"
+  local name="$1"
+  local iface="$2"
+  local family="${3:-4}"
+  local backend
   backend=$(tm_fw_active_backend) || return 1
   if [[ "$family" == "6" && "$backend" == "iptables" ]]; then
-    tm_ip6tables_input_apply_exec "$@"
+    tm_ip6tables_input_apply_exec "$name" "$iface"
     return $?
   fi
   case "$backend" in
-    iptables) tm_iptables_input_apply_exec "$@" ;;
-    nft) tm_nft_input_apply_exec "$@" ;;
+    iptables) tm_iptables_input_apply_exec "$name" "$iface" ;;
+    nft) tm_nft_input_apply_exec "$name" "$iface" ;;
     *) return 1 ;;
   esac
 }
 
 tm_fw_input_delete_exec() {
-  local kind="$1"
-  local name="$2"
-  local family="${3:-4}"
+  local name="$1"
+  local family="${2:-4}"
   local backend
   backend=$(tm_fw_active_backend) || return 1
   if [[ "$family" == "6" && "$backend" == "iptables" ]]; then
-    tm_ip6tables_input_delete_exec "$kind" "$name"
+    tm_ip6tables_input_delete_exec "$name"
     return $?
   fi
   case "$backend" in
-    iptables) tm_iptables_input_delete_exec "$kind" "$name" ;;
-    nft) tm_nft_input_delete_exec "$kind" "$name" ;;
+    iptables) tm_iptables_input_delete_exec "$name" ;;
+    nft) tm_nft_input_delete_exec "$name" ;;
     *) return 1 ;;
   esac
 }

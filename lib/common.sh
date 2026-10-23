@@ -13,22 +13,10 @@ if [[ -n "${TM_COMMON_LOADED:-}" ]]; then
 fi
 TM_COMMON_LOADED=1
 
-TM_VERSION="1.6.3"
+TM_VERSION="2.0.0"
 
 tm_version() {
   printf '%s\n' "$TM_VERSION"
-}
-
-tm_redact() {
-  local msg="$1"
-  local redacted
-  msg=${msg//$'\n'/ }
-  msg=${msg//$'\r'/ }
-  if ! redacted=$(printf '%s' "$msg" | sed -E 's/[A-Za-z0-9+/]{43}=/[REDACTED-KEY]/g'); then
-    printf '%s\n' "$msg"
-    return 0
-  fi
-  printf '%s\n' "$redacted"
 }
 
 tm_styled() {
@@ -60,8 +48,9 @@ tm_face_print() {
 tm_log() {
   local level="$1"
   shift
-  local msg line
-  msg=$(tm_redact "$*")
+  local msg="$*" line
+  msg=${msg//$'\n'/ }
+  msg=${msg//$'\r'/ }
   line="$(date -u +%Y-%m-%dT%H:%M:%SZ) ${level} ${msg}"
   case "$level" in
     DEBUG)
@@ -250,7 +239,7 @@ tm_exec() {
   local bin=""
   if [[ "${TM_TEST_MODE:-0}" == "1" ]]; then
     case "$name" in
-      iptables|ip6tables|nft|ip|sysctl|wg|wg-quick|systemctl|modprobe|haproxy|ping|ss)
+      iptables|ip6tables|nft|ip|sysctl|systemctl|modprobe|ping|ss)
         if [[ -z "${TM_BIN_OVERRIDE[$name]:-}" ]]; then
           tm_error "Test mode refuses to run the real ${name} command."
           return 127

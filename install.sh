@@ -109,7 +109,7 @@ if [[ "$SKIP_PACKAGES" -eq 0 ]]; then
       case " ${ID_LIKE:-} " in
         *" debian "*) ;;
         *)
-          printf '%s\n' "Refusing package installation on ${ID:-unknown}. Re-run with --skip-packages or --force is not offered." >&2
+          printf '%s\n' "Refusing package installation on ${ID:-unknown}. Re-run with --skip-packages." >&2
           exit 1
           ;;
       esac
@@ -165,7 +165,7 @@ fi
 
 if [[ "$(id -u)" -eq 0 ]]; then
   install -d -m 0755 /etc/tunnel-manager
-  install -d -m 0700 /etc/tunnel-manager/keys /etc/tunnel-manager/tunnels /etc/tunnel-manager/forwards
+  install -d -m 0700 /etc/tunnel-manager/tunnels /etc/tunnel-manager/forwards
   install -d -m 0700 /var/lib/tunnel-manager /var/lib/tunnel-manager/backups
   install -d -m 0750 /var/log/tunnel-manager
 fi

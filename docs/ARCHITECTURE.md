@@ -33,9 +33,8 @@ only a tunnel that this run started.
 
 TCP and UDP use the same firewall NAT path. Both are IPv4 only. The tunnel
 itself may still be IPv6. A saved forward sets `net.ipv4.ip_forward=1`.
-The system HAProxy configuration is not modified.
 
-## UDP
+## Firewall
 
 The active backend is detected from `iptables -V` and the presence of
 `nft`.
@@ -77,8 +76,7 @@ the journal is replayed in reverse and rewritten after every successful undo.
 
 Commands are quoted with `printf %q` and replayed into an argument array.
 The array must name a `tm_*` function or an allowlisted external command.
-Descriptions are shown to the operator; raw argv is not, so a private key
-does not appear in the plan.
+Descriptions are shown to the operator; raw argv is not.
 
 ## Services
 
@@ -91,6 +89,5 @@ after a tunnel is saved, unless the unit is already enabled.
 ## Backups
 
 Archives contain an allowlisted set of members: `MANIFEST`, `host.conf`,
-`tunnels/*.conf`, and `forwards/*.conf`. Key files are
-accepted only with `--include-keys`. Restore checks every member, copies
+`tunnels/*.conf`, and `forwards/*.conf`. Restore checks every member, copies
 the files, and does not apply them. The operator runs `apply` after review.

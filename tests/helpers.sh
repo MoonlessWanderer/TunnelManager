@@ -8,11 +8,6 @@ source "${TM_REPO}/lib/load.sh"
 
 TM_PASS=0
 TM_FAIL=0
-# Used by the test files that source this helper.
-# shellcheck disable=SC2034
-TM_TEST_PRIV="$(printf '%43s' '' | tr ' ' 'A')="
-# shellcheck disable=SC2034
-TM_TEST_PUB="$(printf '%43s' '' | tr ' ' 'B')="
 
 tm_pass() {
   TM_PASS=$((TM_PASS + 1))
@@ -107,9 +102,6 @@ tm_test_reset() {
   TM_BIN_OVERRIDE[nft]="${TM_REPO}/tests/fakes/nft"
   TM_BIN_OVERRIDE[ip]="${TM_REPO}/tests/fakes/ip"
   TM_BIN_OVERRIDE[sysctl]="${TM_REPO}/tests/fakes/sysctl"
-  TM_BIN_OVERRIDE[wg]="${TM_REPO}/tests/fakes/wg"
-  TM_BIN_OVERRIDE[wg-quick]="${TM_REPO}/tests/fakes/wg-quick"
-  TM_BIN_OVERRIDE[haproxy]="${TM_REPO}/tests/fakes/haproxy"
   TM_BIN_OVERRIDE[systemctl]="${TM_REPO}/tests/fakes/systemctl"
   TM_BIN_OVERRIDE[modprobe]="${TM_REPO}/tests/fakes/modprobe"
   TM_BIN_OVERRIDE[ping]="${TM_REPO}/tests/fakes/ping"

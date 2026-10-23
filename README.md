@@ -34,12 +34,7 @@ the packages it uses. From a checkout, run `sudo ./install.sh` instead.
 5. On the foreign server, choose Configure a New Tunnel, then Foreign, and
    paste that command. A plain port forward needs nothing on the foreign side.
 
-Saved tunnels and ports come back after a reboot. A server set up by an older
-version needs this once:
-
-```bash
-sudo tunnel-manager service enable
-```
+Saved tunnels and ports come back after a reboot.
 
 ## Menu
 
@@ -69,7 +64,7 @@ More in [docs/OPERATIONS.md](docs/OPERATIONS.md),
 
 ```bash
 bash tests/run-tests.sh
-shellcheck -x bin/tunnel-manager lib/*.sh install.sh uninstall.sh tests/*.sh
+shellcheck -x bin/tunnel-manager bin/tm lib/*.sh install.sh uninstall.sh get.sh tests/*.sh
 ```
 
 The tests use fake `ip`, `iptables`, `nft`, `sysctl`, and `systemctl`

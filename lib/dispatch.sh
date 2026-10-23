@@ -47,7 +47,6 @@ tm_dispatch_tunnel() {
     test) tm_action_tunnel_test "$@" ;;
     list) tm_action_tunnel_list "$@" ;;
     show) tm_action_tunnel_show "$@" ;;
-    export-peer) tm_action_tunnel_export "$@" ;;
     *)
       tm_die "Unknown tunnel command. See: tunnel-manager help"
       ;;

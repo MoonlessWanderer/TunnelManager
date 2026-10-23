@@ -65,7 +65,7 @@ tm_action_doctor() {
   else
     tm_doctor_warn "Not running as root. Changes will be refused."
   fi
-  for cmd in ip sysctl wg; do
+  for cmd in ip sysctl; do
     if tm_cmd_available "$cmd"; then
       tm_doctor_pass "Command ${cmd} is available."
     else

@@ -371,10 +371,6 @@ tm_action_quick() {
         TM_DRY_RUN=1
         shift
         ;;
-      --i-understand-no-encryption)
-        # Accepted for setup commands printed by older versions.
-        shift
-        ;;
       --token)
         [[ "$#" -ge 2 ]] || tm_die "Missing value for --token."
         token="$2"

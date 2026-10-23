@@ -22,10 +22,8 @@ tm_expect_ok "192.168.1.10 and .11 share /24" tm_ipv4_same_subnet 192.168.1.10 1
 tm_expect_fail "port 0 is rejected" tm_valid_port 0
 tm_expect_ok "port 22 is protected" tm_port_is_protected 22
 tm_expect_fail "port 443 is not protected" tm_port_is_protected 443
-tm_expect_ok "wireguard name edge" tm_valid_tunnel_name edge
+tm_expect_ok "tunnel name edge" tm_valid_tunnel_name edge
 tm_expect_fail "reserved name default" tm_valid_tunnel_name default
-tm_expect_ok "default route cidr is recognized" tm_default_route_cidr 0.0.0.0/0
-tm_expect_fail "/32 is not a default route" tm_default_route_cidr 10.200.0.2/32
 tm_expect_ok "compressed ipv6 is valid" tm_valid_ipv6 2001:db8::1
 tm_expect_ok "ipv6 host is unicast" tm_ipv6_is_unicast_host 2001:db8::1
 tm_expect_fail "ipv6 loopback is not a tunnel address" tm_ipv6_is_unicast_host ::1
@@ -41,25 +39,13 @@ tm_expect_fail "ipv6 /48 is too wide for a tunnel" tm_valid_ipv6_prefix 48
 tm_expect_fail "mixed tunnel families are rejected" tm_tunnel_pair_ok 10.200.0.1 2001:db8:1::1 64
 tm_expect_fail "mixed public families are rejected" tm_public_pair_ok 203.0.113.10 2001:db8::20
 tm_expect_ok "ipv6 public pair is accepted" tm_public_pair_ok 2001:db8::10 2001:db8::20
-tm_expect_ok "default ipv6 route is recognized" tm_default_route_cidr ::/0
 
-if [[ ${#TM_TEST_PRIV} -eq 44 && ${#TM_TEST_PUB} -eq 44 ]]; then
-  tm_pass "generated wireguard keys are 44 characters"
+logged=$(tm_info $'first\nsecond' 2>&1)
+if [[ "$logged" == *"first second"* && "$logged" != *$'\n'* ]]; then
+  tm_pass "a log message stays on one line"
 else
-  tm_fail "generated wireguard keys have the wrong length"
+  tm_fail "a log message was split: ${logged}"
 fi
-tm_expect_ok "private test key shape" tm_valid_wg_key "$TM_TEST_PRIV"
-tm_expect_ok "public test key shape" tm_valid_wg_key "$TM_TEST_PUB"
-
-redacted=$(tm_redact "secret ${TM_TEST_PRIV}")
-if [[ "$redacted" == *"[REDACTED-KEY]"* && "$redacted" != *"$TM_TEST_PRIV"* ]]; then
-  tm_pass "log redaction hides a wireguard key"
-else
-  tm_fail "log redaction left a wireguard key visible"
-fi
-extracted=$(tm_normalize_wg_key "copy this ${TM_TEST_PUB} now")
-tm_expect_eq "pasted text keeps the wireguard key" "$extracted" "$TM_TEST_PUB"
-tm_expect_fail "log placeholder is not a key" tm_normalize_wg_key "[REDACTED-KEY]"
 
 tm_expect_eq "default route iface" "$(tm_detect_default_iface)" "eth0"
 tm_expect_eq "nexthop route iface" "$(tm_route_dev 'nexthop via 192.0.2.1 dev ens3 weight 1')" "ens3"

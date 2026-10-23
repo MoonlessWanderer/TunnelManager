@@ -55,9 +55,6 @@ tm_command_is_read_only() {
         *) return 1 ;;
       esac
       ;;
-    wg)
-      [[ "${1:-}" == "show" ]]
-      ;;
     ss|ping)
       return 0
       ;;
@@ -228,9 +225,9 @@ tm_iptables_rule_is_safe() {
       tm_ipv4_is_unicast_host "$to_src" || return 1
       ;;
     ACCEPT)
-      [[ "$chain" == "TM_FORWARD" || "$chain" == "TM_INPUT" ]] || return 1
       case "$proto" in
         udp|tcp)
+          [[ "$chain" == "TM_FORWARD" ]] || return 1
           [[ -n "$dport" || -n "$sport" ]] || return 1
           tm_iptables_ctstate_ok "$ctstate" || return 1
           ;;
@@ -243,12 +240,6 @@ tm_iptables_rule_is_safe() {
           return 1
           ;;
       esac
-      if [[ "$chain" == "TM_INPUT" ]]; then
-        [[ -n "$in_iface" ]] || return 1
-        if [[ -n "$dport" ]] && tm_port_is_protected "$dport"; then
-          return 1
-        fi
-      fi
       ;;
     *)
       return 1
@@ -426,7 +417,9 @@ tm_nft_rule_tail_is_safe() {
       udp|tcp)
         proto_seen=1
         ;;
-      gre)
+      meta)
+        [[ "${args[$((i + 1))]:-}" == "l4proto" && "${args[$((i + 2))]:-}" == "gre" ]] || return 1
+        i=$((i + 2))
         gre_seen=1
         ;;
       ip)
@@ -479,13 +472,7 @@ tm_nft_rule_tail_is_safe() {
       [[ "$proto_seen" -eq 1 && -n "$dport" ]] || return 1
       ;;
     input:accept)
-      [[ "$iif_seen" -eq 1 ]] || return 1
-      if [[ "$gre_seen" -eq 1 ]]; then
-        [[ -z "$dport" ]] || return 1
-      else
-        [[ "$proto_seen" -eq 1 && -n "$dport" ]] || return 1
-        tm_port_is_protected "$dport" && return 1
-      fi
+      [[ "$iif_seen" -eq 1 && "$gre_seen" -eq 1 && "$proto_seen" -eq 0 && -z "$dport" ]] || return 1
       ;;
     *)
       return 1

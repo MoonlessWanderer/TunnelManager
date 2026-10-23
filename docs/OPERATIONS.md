@@ -3,7 +3,7 @@
 ## First server
 
 ```bash
-sudo install.sh
+curl -fsSL https://raw.githubusercontent.com/MoonlessWanderer/TunnelManager/main/get.sh | sudo bash
 sudo tm
 ```
 
@@ -173,8 +173,8 @@ saved state. It does not prompt. An interface that is already up is left up if
 a later step fails.
 
 Menu setup, adding ports from the menu, and `quick` enable the unit when they
-save a tunnel. The setup summary says so before anything runs. A server set up
-by an older version, or with other commands, needs it once:
+save a tunnel. The setup summary says so before anything runs. Tunnels and
+forwards made only with `tunnel create` or `forward add` need it once:
 
 ```bash
 sudo tunnel-manager service enable

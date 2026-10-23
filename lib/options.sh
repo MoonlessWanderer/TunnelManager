@@ -30,14 +30,6 @@ tm_opts_parse() {
         _tm_parsed['verbose']=1
         shift
         ;;
-      --i-understand-no-encryption)
-        # Accepted for setup commands printed by older versions.
-        shift
-        ;;
-      --include-keys)
-        _tm_parsed['include_keys']=1
-        shift
-        ;;
       --help|-h)
         _tm_parsed['help']=1
         shift

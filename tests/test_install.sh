@@ -6,7 +6,7 @@ tm_test_reset
 
 prefix="${TM_TEST_ROOT}/prefix"
 bash "${TM_REPO}/install.sh" --prefix "$prefix" --skip-packages --skip-systemd
-if [[ -f "${prefix}/bin/tunnel-manager" && -f "${prefix}/bin/tm" && -f "${prefix}/lib/tunnel-manager/load.sh" && -f "${prefix}/lib/tunnel-manager/setup.sh" && ! -e "${prefix}/lib/tunnel-manager/haproxy-reload.sh" ]]; then
+if [[ -f "${prefix}/bin/tunnel-manager" && -f "${prefix}/bin/tm" && -f "${prefix}/lib/tunnel-manager/load.sh" && -f "${prefix}/lib/tunnel-manager/setup.sh" ]]; then
   tm_pass "install lays out the executable and libraries"
 else
   tm_fail "install layout is incomplete"
@@ -17,7 +17,7 @@ else
   tm_fail "tm does not open the menu"
 fi
 installed_version=$(bash "${prefix}/bin/tunnel-manager" version)
-tm_expect_eq "installed version" "$installed_version" "1.6.3"
+tm_expect_eq "installed version" "$installed_version" "2.0.0"
 bash "${TM_REPO}/uninstall.sh" --prefix "$prefix" --yes --skip-down
 if [[ ! -e "${prefix}/bin/tunnel-manager" && ! -e "${prefix}/bin/tm" && ! -e "${prefix}/lib/tunnel-manager" ]]; then
   tm_pass "uninstall removes installed files"
@@ -53,22 +53,22 @@ etc="${purge}/etc/tunnel-manager"
 var="${purge}/var/tunnel-manager"
 log="${purge}/log/tunnel-manager"
 run="${purge}/run/tunnel-manager"
-wg="${purge}/wireguard"
+other="${purge}/other"
 fwd="${purge}/99-tunnel-manager.conf"
 bbr="${purge}/98-tunnel-manager-bbr.conf"
 bbr_mod="${purge}/tunnel-manager-bbr.conf"
 prefix_purge="${purge}/prefix"
-mkdir -p -- "$etc/keys" "$var" "$log" "$run" "$wg" "$prefix_purge"
-printf 'secret\n' >"$etc/keys/edge.key"
-printf 'tunnel\n' >"$wg/tm-edge.conf"
-printf 'keep\n' >"$wg/wg0.conf"
+mkdir -p -- "$etc/tunnels" "$var" "$log" "$run" "$other" "$prefix_purge"
+printf 'TM_TUNNEL_NAME=edge\n' >"$etc/tunnels/edge.conf"
+printf 'tunnel\n' >"$other/tm-edge.conf"
+printf 'keep\n' >"$other/app.conf"
 printf 'managed\n' >"$fwd"
 printf 'tcp_bbr\n' >"$bbr_mod"
 TM_TEST_MODE=1 TM_TEST_ROOT="$purge" \
   TM_ETC="$etc" TM_VAR="$var" TM_LOG_DIR="$log" TM_RUN="$run" \
   TM_SYSCTL_FILE="$fwd" TM_BBR_FILE="$bbr" TM_BBR_MOD_FILE="$bbr_mod" \
   bash "${TM_REPO}/uninstall.sh" --prefix "$prefix_purge" --yes --purge-state --skip-down
-if [[ ! -e "$etc" && ! -e "$var" && ! -e "$log" && ! -e "$run" && ! -e "$fwd" && ! -e "$bbr" && ! -e "$bbr_mod" && -f "$wg/tm-edge.conf" && -f "$wg/wg0.conf" ]]; then
+if [[ ! -e "$etc" && ! -e "$var" && ! -e "$log" && ! -e "$run" && ! -e "$fwd" && ! -e "$bbr" && ! -e "$bbr_mod" && -f "$other/tm-edge.conf" && -f "$other/app.conf" ]]; then
   tm_pass "purge removes tunnel manager state and leaves other config files"
 else
   tm_fail "purge did not remove only tunnel manager state"

@@ -26,8 +26,8 @@ rm -f -- "${TM_FAKE_ROOT}/iptables.version" "${TM_FAKE_ROOT}/iptables.user-rules
   "${TM_FAKE_ROOT}/iptables.log" "${TM_FAKE_ROOT}/iptables.state" "${TM_FAKE_ROOT}/nft.log" "${TM_FAKE_ROOT}/nft.state"
 unset 'TM_BIN_OVERRIDE[nft]'
 TM_FW_BACKEND=iptables
-tm_expect_ok "first udp apply" tm_iptables_udp_apply_exec edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
-tm_expect_ok "second udp apply" tm_iptables_udp_apply_exec edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
+tm_expect_ok "first udp apply" tm_iptables_l4_apply_exec udp edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
+tm_expect_ok "second udp apply" tm_iptables_l4_apply_exec udp edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
 appends=$(grep -c -- "-A TM_PREROUTING" "${TM_FAKE_ROOT}/iptables.log" || true)
 tm_expect_eq "DNAT is not duplicated" "$appends" "1"
 if grep -E '(^|[[:space:]])-F([[:space:]]|$)|--flush' "${TM_FAKE_ROOT}/iptables.log"; then
@@ -40,7 +40,7 @@ if [[ -s "${TM_FAKE_ROOT}/nft.log" ]]; then
 else
   tm_pass "iptables apply does not invoke nft"
 fi
-IFS=$'\n\t' tm_expect_ok "udp delete" tm_iptables_udp_delete_exec edge
+IFS=$'\n\t' tm_expect_ok "udp delete" tm_iptables_l4_delete_exec udp edge
 tm_expect_ok "iptables tcp apply" tm_iptables_l4_apply_exec tcp web eth0 443 10.200.0.2 443 10.200.0.1 no
 if grep -q -- '-p tcp --dport 443' "${TM_FAKE_ROOT}/iptables.log"; then
   tm_pass "iptables tcp DNAT is installed"
@@ -54,25 +54,26 @@ else
   tm_fail "empty chain was not deleted"
 fi
 
-printf '%s\n' "CHAIN filter TM_INPUT" >>"${TM_FAKE_ROOT}/iptables.state"
-printf 'RULE\tfilter\tTM_INPUT\t%s\n' \
-  '-i eth0 -p udp -m udp --dport 51820 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment "tm:wg:edge:input" -j ACCEPT' \
-  >>"${TM_FAKE_ROOT}/iptables.state"
+{
+  printf '%s\n' "CHAIN filter TM_FORWARD"
+  printf 'RULE\tfilter\tTM_FORWARD\t%s\n' \
+    '-d 10.200.0.2/32 -p udp -m udp --dport 5000 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment "tm:udp:edge:fwd" -j ACCEPT'
+} >>"${TM_FAKE_ROOT}/iptables.state"
 tm_expect_ok "iptables -S rule with -m udp can be deleted" \
-  tm_iptables_delete_comment filter TM_INPUT tm:wg:edge:input
-if grep -q 'tm:wg:edge:input' "${TM_FAKE_ROOT}/iptables.state"; then
-  tm_fail "quoted input rule was not removed"
+  tm_iptables_delete_comment filter TM_FORWARD tm:udp:edge:fwd
+if grep -q 'tm:udp:edge:fwd' "${TM_FAKE_ROOT}/iptables.state"; then
+  tm_fail "quoted forward rule was not removed"
 else
-  tm_pass "quoted input rule was removed"
+  tm_pass "quoted forward rule was removed"
 fi
 
 tm_split_saved_rule() {
   local -a spec=()
   local joined
-  IFS=$'\n' tm_iptables_split_spec '-i eth0 -p udp -m udp --dport 51820 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment "tm:wg:edge:input" -j ACCEPT' spec
+  IFS=$'\n' tm_iptables_split_spec '-d 10.200.0.2/32 -p udp -m udp --dport 5000 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment "tm:udp:edge:fwd" -j ACCEPT' spec
   joined=$(printf '%s ' "${spec[@]}")
-  [[ "$joined" == '-i eth0 -p udp -m udp --dport 51820 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment tm:wg:edge:input -j ACCEPT ' ]] || return 1
-  tm_iptables_argv_is_safe iptables -t filter -D TM_INPUT "${spec[@]}"
+  [[ "$joined" == '-d 10.200.0.2/32 -p udp -m udp --dport 5000 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment tm:udp:edge:fwd -j ACCEPT ' ]] || return 1
+  tm_iptables_argv_is_safe iptables -t filter -D TM_FORWARD "${spec[@]}"
 }
 tm_expect_ok "saved rule splits when IFS has no space" tm_split_saved_rule
 
@@ -114,9 +115,9 @@ TM_BIN_OVERRIDE[nft]="${TM_REPO}/tests/fakes/nft"
 unset 'TM_BIN_OVERRIDE[iptables]'
 rm -f -- "${TM_FAKE_ROOT}/nft.log" "${TM_FAKE_ROOT}/nft.state" "${TM_FAKE_ROOT}/nft.handle"
 TM_FW_BACKEND=nft
-tm_expect_ok "nft udp apply" tm_fw_udp_apply_exec edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
+tm_expect_ok "nft udp apply" tm_fw_l4_apply_exec udp edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
 rules_first=$(grep -c "add rule" "${TM_FAKE_ROOT}/nft.log" || true)
-tm_expect_ok "nft udp apply again" tm_fw_udp_apply_exec edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
+tm_expect_ok "nft udp apply again" tm_fw_l4_apply_exec udp edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
 rules_second=$(grep -c "add rule" "${TM_FAKE_ROOT}/nft.log" || true)
 tm_expect_eq "nft rules are not duplicated" "$rules_first" "$rules_second"
 tm_expect_ok "nft tcp apply" tm_fw_l4_apply_exec tcp web eth0 443 10.200.0.2 443 10.200.0.1 yes
@@ -125,12 +126,24 @@ if grep -q "tcp dport 443" "${TM_FAKE_ROOT}/nft.log"; then
 else
   tm_fail "nft tcp DNAT was not installed"
 fi
+tm_expect_ok "nft gre input allow" tm_fw_input_apply_exec edge eth0 4
+if grep -q "add rule inet tunnel_manager input iifname eth0 meta l4proto gre accept comment tm:gre:edge:input" "${TM_FAKE_ROOT}/nft.log"; then
+  tm_pass "nft gre input allow uses meta l4proto"
+else
+  tm_fail "nft gre input allow was not installed"
+fi
+tm_expect_ok "nft gre input delete" tm_fw_input_delete_exec edge 4
+if grep -q "tm:gre:edge:input" "${TM_FAKE_ROOT}/nft.state"; then
+  tm_fail "nft gre input allow was left behind"
+else
+  tm_pass "nft gre input allow was removed"
+fi
 printf '%s\n' "table inet filter {" >"${TM_FAKE_ROOT}/nft.foreign"
 printf '%s\n' "  chain input { type filter hook input priority 0; policy drop; }" >>"${TM_FAKE_ROOT}/nft.foreign"
 printf '%s\n' "}" >>"${TM_FAKE_ROOT}/nft.foreign"
 : >"${TM_FAKE_ROOT}/nft.log"
 tm_expect_ok "nft nat still applies beside a foreign filter hook" \
-  tm_fw_udp_apply_exec other eth0 5001 10.200.0.2 5001 10.200.0.1 yes
+  tm_fw_l4_apply_exec udp other eth0 5001 10.200.0.2 5001 10.200.0.1 yes
 if grep -q "hook forward" "${TM_FAKE_ROOT}/nft.log"; then
   tm_fail "nft added a filter forward hook beside a foreign filter"
 else

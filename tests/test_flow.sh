@@ -9,8 +9,8 @@ TM_FW_BACKEND=iptables
 unset 'TM_BIN_OVERRIDE[nft]'
 unset 'TM_BIN_OVERRIDE[systemctl]'
 
-tm_expect_fail "wireguard type is rejected" \
-  tm_action_tunnel_create --name old --type wireguard \
+tm_expect_fail "unknown tunnel type is rejected" \
+  tm_action_tunnel_create --name other --type vxlan \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
   --wan-iface eth0 --yes
@@ -19,12 +19,20 @@ tm_expect_ok "create gre tunnel" \
   tm_action_tunnel_create --name edge --type gre \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
-  --wan-iface eth0 --i-understand-no-encryption --yes
+  --wan-iface eth0 --yes
 
 if grep -q '^tm-edge$' "${TM_FAKE_ROOT}/ip.links"; then
   tm_pass "gre interface was created"
 else
   tm_fail "gre interface was not created"
+fi
+saved_keys=$(sed -n 's/=.*//p' "$(tm_tunnel_file edge)" | tr '\n' ' ')
+tm_expect_eq "gre state keys" "$saved_keys" \
+  "TM_TUNNEL_NAME TM_TUNNEL_TYPE TM_TUNNEL_STATE TM_LOCAL_PUBLIC_IP TM_REMOTE_PUBLIC_IP TM_LOCAL_TUNNEL_IP TM_REMOTE_TUNNEL_IP TM_TUNNEL_CIDR TM_MTU TM_WAN_IFACE "
+if grep -q -- '-A TM_INPUT -i eth0 -p gre -m comment --comment tm:gre:edge:input -j ACCEPT' "${TM_FAKE_ROOT}/iptables.log"; then
+  tm_pass "gre input allow is installed"
+else
+  tm_fail "gre input allow was not installed"
 fi
 
 tm_expect_fail "rp_filter is not written for a missing interface" tm_rp_filter_apply_exec tm-missing
@@ -37,7 +45,7 @@ tm_expect_fail "duplicate tunnel is rejected" \
   tm_action_tunnel_create --name edge --type gre \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
-  --wan-iface eth0 --i-understand-no-encryption --yes
+  --wan-iface eth0 --yes
 
 tm_expect_fail "SSH listen port is rejected" \
   tm_action_forward_add --name bad --proto tcp --listen-port 22 \
@@ -48,8 +56,7 @@ tm_expect_ok "add tcp forward" \
   --dest-ip 10.200.0.2 --source-ip 10.200.0.1 --ingress-iface eth0 --snat never --yes
 if grep -q -- '-p tcp --dport 443' "${TM_FAKE_ROOT}/iptables.log" \
   && grep -q -- 'tm:tcp:web:dnat' "${TM_FAKE_ROOT}/iptables.log" \
-  && grep -q -- 'DNAT' "${TM_FAKE_ROOT}/iptables.log" \
-  && [[ ! -f "${TM_ETC}/haproxy.cfg" ]]; then
+  && grep -q -- 'DNAT' "${TM_FAKE_ROOT}/iptables.log"; then
   tm_pass "tcp forward installed DNAT through the firewall"
 else
   tm_fail "tcp forward did not use firewall NAT"
@@ -85,14 +92,6 @@ tm_expect_eq "ensure rollback status" "$status" "4"
 links_after=$(grep -c '^tm-edge$' "${TM_FAKE_ROOT}/ip.links" || true)
 tm_expect_eq "existing tunnel stays up after rollback" "$links_before" "$links_after"
 
-out="${TM_VAR}/peer-edge.conf"
-tm_expect_ok "export peer bundle" tm_action_tunnel_export --name edge --output "$out" --yes
-if grep -q "TM_PEER_PUBLIC_IP=203.0.113.10" "$out" && ! grep -q "$TM_TEST_PRIV" "$out"; then
-  tm_pass "peer export contains the public address and no private key"
-else
-  tm_fail "peer export was incomplete"
-fi
-
 text=$(TM_DRY_RUN=1 tm_action_tunnel_create --name gre1 --type gre \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.5 --remote-tunnel-ip 10.200.0.6 \
@@ -125,7 +124,7 @@ else
 fi
 
 tm_expect_fail "unknown tunnel command is rejected" \
-  tm_dispatch_tunnel set-peer --name edge --peer-public-key "$TM_TEST_PUB" --yes
+  tm_dispatch_tunnel bogus --name edge --yes
 tm_expect_ok "tcp forward takes addresses from the tunnel" \
   tm_action_forward_add --name auto --proto tcp --listen-port 9443 --tunnel edge --yes
 if grep -q -- '-i eth0 -p tcp --dport 9443' "${TM_FAKE_ROOT}/iptables.log" \
@@ -163,7 +162,7 @@ tm_expect_ok "disabled bbr stays off" tm_action_bbr_disable --yes
 
 printf '%s\n' 'eth0 203.0.113.31/32' >>"${TM_FAKE_ROOT}/ip.addrs"
 set +e
-quick_text=$(tm_action_quick --dry-run --i-understand-no-encryption --token \
+quick_text=$(tm_action_quick --dry-run --token \
   'v1:gre:link:203.0.113.10:203.0.113.31:10.200.0.1:10.200.0.2:30' 2>&1)
 set -e
 TM_DRY_RUN=0

@@ -154,7 +154,6 @@ tm_ensure_tree() {
   tm_mkdir_mode "$TM_ETC" 0755
   tm_mkdir_mode "$TM_ETC/tunnels" 0700
   tm_mkdir_mode "$TM_ETC/forwards" 0700
-  tm_mkdir_mode "$TM_ETC/keys" 0700
   tm_mkdir_mode "$TM_VAR" 0700
   tm_mkdir_mode "$TM_VAR/backups" 0700
   tm_mkdir_mode "$TM_VAR/snapshots" 0700
@@ -261,12 +260,9 @@ tm_kv_key_ok() {
   case "$1" in
     TM_HOST_ROLE|TM_HOST_PUBLIC_IP|TM_HOST_WAN_IFACE|TM_SSH_PORT|TM_FW_BACKEND|\
       TM_TUNNEL_NAME|TM_TUNNEL_TYPE|TM_TUNNEL_STATE|TM_LOCAL_PUBLIC_IP|TM_REMOTE_PUBLIC_IP|\
-      TM_LOCAL_TUNNEL_IP|TM_REMOTE_TUNNEL_IP|TM_TUNNEL_CIDR|TM_LISTEN_PORT|TM_ENDPOINT_PORT|\
-      TM_MTU|TM_KEEPALIVE|TM_WAN_IFACE|TM_PEER_PUBLIC_KEY|TM_PRIVATE_KEY_FILE|TM_GRE_ACK|\
-      TM_FORWARD_NAME|TM_FORWARD_PROTO|TM_LISTEN_IP|TM_DEST_IP|TM_DEST_PORT|TM_SNAT|\
-      TM_INGRESS_IFACE|TM_SOURCE_IP|TM_TUNNEL_REF|\
-      TM_PEER_NAME|TM_PEER_ROLE|TM_PEER_PUBLIC_IP|TM_PEER_TUNNEL_IP|TM_PEER_LISTEN_PORT|\
-      TM_PEER_TUNNEL_TYPE|TM_PEER_CIDR|TM_PEER_MTU|TM_PEER_WAN_HINT)
+      TM_LOCAL_TUNNEL_IP|TM_REMOTE_TUNNEL_IP|TM_TUNNEL_CIDR|TM_MTU|TM_WAN_IFACE|\
+      TM_FORWARD_NAME|TM_FORWARD_PROTO|TM_LISTEN_IP|TM_LISTEN_PORT|TM_DEST_IP|TM_DEST_PORT|\
+      TM_SNAT|TM_INGRESS_IFACE|TM_SOURCE_IP|TM_TUNNEL_REF)
       return 0
       ;;
     *)
@@ -279,10 +275,9 @@ tm_kv_value_ok() {
   local value="$1"
   [[ -n "$value" ]] || return 1
   ((${#value} <= 220)) || return 1
-  # Slash is allowed so a private-key path can be stored. ".." is not.
   [[ "$value" != *..* ]] || return 1
-  # Colon is allowed for IPv6 addresses. ".." is still rejected above.
-  [[ "$value" =~ ^[A-Za-z0-9._+/=:@,:/-]+$ ]] || return 1
+  # Colon is allowed for IPv6 addresses.
+  [[ "$value" =~ ^[A-Za-z0-9._:-]+$ ]] || return 1
   return 0
 }
 
@@ -303,7 +298,6 @@ tm_kv_read() {
     [[ -z "$line" ]] && continue
     [[ "$line" =~ ^[[:space:]]*# ]] && continue
     [[ "$line" != *"="* ]] && return 1
-    # Values may contain '='.
     [[ "$line" =~ ^[A-Z0-9_]+=.+$ ]] || return 1
     key=${line%%=*}
     value=${line#*=}
@@ -368,14 +362,6 @@ tm_tunnel_iface() {
 
 tm_forward_file() {
   printf '%s\n' "${TM_ETC}/forwards/${1}.conf"
-}
-
-tm_key_file() {
-  printf '%s\n' "${TM_ETC}/keys/${1}.key"
-}
-
-tm_pub_file() {
-  printf '%s\n' "${TM_ETC}/keys/${1}.pub"
 }
 
 tm_list_files() {
