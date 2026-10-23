@@ -25,7 +25,9 @@ administer, and review every plan before confirming it.
 
 `wg genkey` output is stored mode `0600`. The peer bundle and normal backups
 contain the public key only. Logs replace 43-character base64 keys with
-`[REDACTED-KEY]`. The plan prints descriptions rather than command argv.
+`[REDACTED-KEY]`, so a public key must be copied from the terminal line that
+starts with the key itself, or from menu item "Show my public key". The plan
+prints descriptions rather than command argv.
 
 ## Firewall interaction
 

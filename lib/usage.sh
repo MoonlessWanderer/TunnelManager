@@ -66,6 +66,16 @@ Usage:
 
 tm opens the menu. tunnel-manager with no arguments does the same on a terminal.
 
+Menu shortcuts:
+  1  Quick WireGuard setup. Asks which side this server is, the two reachable
+     addresses, and the other public key if you already have it. Tunnel name
+     edge, addresses 10.200.0.1 and 10.200.0.2, port 51820, and the WAN
+     interface are filled in automatically.
+  2  Paste the other server public key and start the tunnel.
+  3  Show this server public key. Copy that line, not a log line.
+  4  Forward a port. The tunnel addresses and WAN interface come from the
+     saved tunnel. Port 443 TCP is the default.
+
 Global flags:
   --yes       Apply without an extra confirmation prompt.
   --dry-run   Print the plan and do not change the system.

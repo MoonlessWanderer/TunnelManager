@@ -249,6 +249,7 @@ tm_action_forward_add() {
     tm_kv_read "$(tm_tunnel_file "$tunnel_ref")" tun || tm_die "Tunnel ${tunnel_ref} was not found."
     [[ -n "$source_ip" ]] || source_ip="${tun[TM_LOCAL_TUNNEL_IP]}"
     [[ -n "$dest_ip" ]] || dest_ip="${tun[TM_REMOTE_TUNNEL_IP]}"
+    [[ -n "$ingress" ]] || ingress="${tun[TM_WAN_IFACE]:-}"
   fi
   [[ -n "$dest_ip" ]] || tm_die "Missing required option --dest-ip."
   [[ -n "$listen_port" ]] || tm_die "Missing required option --listen-port."

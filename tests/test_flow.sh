@@ -147,6 +147,41 @@ status=0
 tm_action_forward_add --name boom --proto tcp --listen-port 8443 \
   --dest-ip 10.200.0.2 --source-ip 10.200.0.1 --ingress-iface eth0 --snat never --yes || status=$?
 rm -f -- "${TM_FAKE_ROOT}/haproxy.reject-if"
+shown=$(tm_action_tunnel_create --name pair --type wireguard \
+  --local-public-ip 203.0.113.30 --remote-public-ip 203.0.113.40 \
+  --local-tunnel-ip 10.200.1.1 --remote-tunnel-ip 10.200.1.2 \
+  --wan-iface eth0 --yes)
+pub=$(tr -d '[:space:]' <"$(tm_pub_file pair)")
+if [[ "$shown" == *"$pub"* && "$shown" != *"[REDACTED-KEY]"* ]]; then
+  tm_pass "public key is printed outside the log"
+else
+  tm_fail "public key was not printed"
+fi
+if grep -q "$pub" "$TM_LOG_FILE" || grep -q "$TM_TEST_PRIV" "$TM_LOG_FILE"; then
+  tm_fail "a wireguard key was written to the log"
+else
+  tm_pass "printed public key stayed out of the log"
+fi
+other="$(printf '%43s' '' | tr ' ' 'C')="
+tm_expect_fail "placeholder peer key is rejected" \
+  tm_action_tunnel_set_peer --name pair --peer-public-key '[REDACTED-KEY]' --yes
+tm_expect_ok "peer key can be pasted inside a sentence" \
+  tm_action_tunnel_set_peer --name pair --peer-public-key "use ${other} please" --yes
+if grep -q "TM_PEER_PUBLIC_KEY=${other}" "$(tm_tunnel_file pair)"; then
+  tm_pass "pasted peer key was stored"
+else
+  tm_fail "pasted peer key was not stored"
+fi
+tm_expect_ok "tcp forward takes addresses from the tunnel" \
+  tm_action_forward_add --name auto --proto tcp --listen-port 9443 --tunnel edge --yes
+if grep -q "frontend tm_auto_fe" "$TM_HAPROXY_CFG" \
+  && grep -q "bind 0.0.0.0:9443" "$TM_HAPROXY_CFG" \
+  && grep -q "server dest 10.200.0.2:9443 source 10.200.0.1" "$TM_HAPROXY_CFG"; then
+  tm_pass "tunnel forward filled destination, source, and listen address"
+else
+  tm_fail "tunnel forward did not use the saved tunnel"
+fi
+
 tm_expect_eq "rejected haproxy forward rolls back" "$status" "4"
 if [[ ! -f "${TM_ETC}/forwards/boom.conf" && ! -f "$(tm_journal_path)" ]] \
   && grep -q "frontend tm_web_fe" "$TM_HAPROXY_CFG" \

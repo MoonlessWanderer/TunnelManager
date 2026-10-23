@@ -154,6 +154,24 @@ tm_valid_wg_key() {
   [[ "$1" =~ ^[A-Za-z0-9+/]{43}=$ ]]
 }
 
+# Pull a WireGuard key out of pasted text. Logs hide keys as [REDACTED-KEY],
+# so that placeholder is rejected instead of being stored.
+tm_normalize_wg_key() {
+  local key="$1"
+  key=${key//$'\r'/}
+  key=${key//$'\n'/}
+  if [[ "$key" == *"[REDACTED-KEY]"* || "$key" == *REDACTED-KEY* ]]; then
+    tm_error "That text is a log placeholder, not the key. On the other server run sudo tm and choose Show my public key. Copy the line that ends with =."
+    return 1
+  fi
+  if [[ "$key" =~ ([A-Za-z0-9+/]{43}=) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  tm_error "A WireGuard public key is 44 characters and ends with =."
+  return 1
+}
+
 tm_valid_bool_word() {
   case "$1" in
     yes|no) return 0 ;;

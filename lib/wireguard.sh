@@ -121,7 +121,23 @@ tm_wg_keygen_exec() {
   }
   unset priv
   printf '%s\n' "$pub" | tm_write_file "$pubfile" 0644 || return 1
-  tm_info "WireGuard public key for ${name}: ${pub}"
+  unset pub
+}
+
+# Print to the terminal, not the log. The log redacts every key-shaped value,
+# including the public key the other server needs.
+tm_print_public_key() {
+  local name="$1"
+  local pub="${2:-}"
+  local pubfile
+  if [[ -z "$pub" ]]; then
+    pubfile=$(tm_pub_file "$name")
+    [[ -f "$pubfile" ]] || return 1
+    pub=$(tr -d '[:space:]' <"$pubfile")
+  fi
+  tm_valid_wg_key "$pub" || return 1
+  printf '\n%s\n' "PUBLIC KEY for ${name}. Copy this single line to the other server:"
+  printf '%s\n\n' "$pub"
 }
 
 tm_wg_key_undo() {

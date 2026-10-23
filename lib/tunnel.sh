@@ -280,6 +280,9 @@ tm_action_tunnel_create() {
   if [[ -f "$(tm_peer_import_candidate "${opt[peer_file]:-}")" ]]; then
     tm_tunnel_apply_peer_file req "${opt[peer_file]}"
   fi
+  if [[ -n "${req[peer_public_key]:-}" ]]; then
+    req[peer_public_key]=$(tm_normalize_wg_key "${req[peer_public_key]}") || return 1
+  fi
   tm_tunnel_validate_request req || tm_die "Tunnel validation failed."
   if [[ -f "$(tm_tunnel_file "${req[name]}")" ]]; then
     tm_die "Tunnel ${req[name]} already exists."
@@ -325,7 +328,12 @@ tm_action_tunnel_create() {
       tm_noop
   fi
   tm_require_change_privileges
-  tm_with_lock tm_plan_apply
+  local status=0
+  tm_with_lock tm_plan_apply || status=$?
+  if [[ "$status" -eq 0 && "${req[type]}" == "wireguard" && "${TM_DRY_RUN:-0}" != "1" ]]; then
+    tm_print_public_key "${req[name]}" || true
+  fi
+  return "$status"
 }
 
 tm_peer_import_candidate() {
@@ -362,7 +370,7 @@ tm_action_tunnel_set_peer() {
     tm_kv_read "${opt[peer_file]}" peerfile || tm_die "Peer file is invalid."
     peer="${peerfile[TM_PEER_PUBLIC_KEY]:-}"
   fi
-  tm_valid_wg_key "$peer" || tm_die "A valid --peer-public-key is required."
+  peer=$(tm_normalize_wg_key "$peer") || return 1
   tm_tunnel_load "$name" row || tm_die "Tunnel ${name} was not found."
   [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]] || tm_die "set-peer applies to WireGuard tunnels."
   tm_plan_require_clear_journal

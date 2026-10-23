@@ -141,9 +141,21 @@ transit.
 
 ## Menu
 
-`sudo tunnel-manager menu` asks for the same values as the commands above:
-create, delete, restart, and test a tunnel; add, edit, delete, list, and test
-forwards; status, doctor, backup, restore, apply, dry-run apply, and rollback.
+`sudo tm` opens the menu.
+
+1. Quick WireGuard setup asks which side this server is and the two reachable
+   addresses. It uses tunnel name `edge`, inner addresses `10.200.0.1` and
+   `10.200.0.2`, listen port 51820, and the detected WAN interface. The public
+   key is printed as one line after the change is applied.
+2. Paste the other server public key. Extra words around the key are ignored.
+   The log placeholder `[REDACTED-KEY]` is rejected.
+3. Show my public key.
+4. Forward a port. Press Enter to forward TCP 443 through `edge`. Destination,
+   source, and WAN interface come from the saved tunnel.
+
+The remaining items create a tunnel with custom addresses, delete, restart,
+test, edit forwards, show status, troubleshoot, back up, restore, apply,
+dry-run, roll back, and update.
 
 ## Reboot
 

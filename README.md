@@ -80,8 +80,11 @@ sudo tunnel-manager tunnel test --name edge
 sudo tunnel-manager doctor
 ```
 
-Run `tm` or `tunnel-manager` with no arguments on a terminal to open the menu.
-Menu item 13, or `tunnel-manager update`, downloads the main branch and
+Run `sudo tm` to open the menu. Item 1 sets up WireGuard with the inner
+addresses and listen port filled in. Item 3 prints this server's public key
+as one line. Item 2 pastes the other server's key and starts the tunnel.
+Item 4 forwards a port; TCP 443 through the saved tunnel is the default.
+Menu item 17, or `tunnel-manager update`, downloads the main branch and
 reinstalls the program. It keeps saved tunnels and does not enable services.
 `tunnel-manager --dry-run apply` prints the plan and does not change the system.
 

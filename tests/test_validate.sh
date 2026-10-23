@@ -57,5 +57,8 @@ if [[ "$redacted" == *"[REDACTED-KEY]"* && "$redacted" != *"$TM_TEST_PRIV"* ]]; 
 else
   tm_fail "log redaction left a wireguard key visible"
 fi
+extracted=$(tm_normalize_wg_key "copy this ${TM_TEST_PUB} now")
+tm_expect_eq "pasted text keeps the wireguard key" "$extracted" "$TM_TEST_PUB"
+tm_expect_fail "log placeholder is not a key" tm_normalize_wg_key "[REDACTED-KEY]"
 
 tm_finish
