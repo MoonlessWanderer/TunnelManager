@@ -58,9 +58,11 @@ Useful installer flags:
 - `--skip-systemd` skips unit installation
 - `--yes` is accepted and does not change network state by itself
 
-`uninstall.sh` stops Tunnel Manager through its own `down` command, removes
-its files, and does not remove `wireguard` or `haproxy`. `--purge-state`
-also removes `/etc/tunnel-manager` and `/var/lib/tunnel-manager`.
+`uninstall.sh` stops Tunnel Manager through its own `down` command and removes
+its files. It does not remove the `wireguard` or `haproxy` packages. The menu
+uninstall, and `--purge-state`, also remove saved tunnels, keys, logs, the
+Tunnel Manager sysctl files, and `/etc/wireguard/tm-*.conf`. Missing paths are
+ignored. Other WireGuard configs stay in place.
 
 ## Typical flow
 
@@ -85,7 +87,7 @@ Run `sudo tm` to open the menu.
 1. Configure a New Tunnel. Quick setup fills the tunnel name, inner addresses, listen port, and WAN interface.
 2. Manage Tunnels. Show or paste the public key, forward a port, and reach status, backup, apply, and rollback.
 3. Update downloads the main branch and reinstalls the program. Saved tunnels stay in place and services are not enabled.
-4. Uninstall removes Tunnel Manager and does not flush firewall rules owned by other tools.
+4. Uninstall asks once, then removes the program and everything it saved. Missing files are skipped. Other firewall rules stay in place.
 5. Enable BBR sets `fq` and `bbr` only. It does not change the default route.
 
 `tunnel-manager --dry-run apply` prints the plan and does not change the system.

@@ -304,19 +304,15 @@ tm_menu_uninstall_script() {
 
 tm_menu_uninstall() {
   local script="" prefix=""
-  local -a purge=()
   script=$(tm_menu_uninstall_script) || tm_die "uninstall.sh was not found. Reinstall Tunnel Manager."
   prefix="${TM_PREFIX:-/usr/local}"
-  printf '\n%s\n' "This stops Tunnel Manager and removes the program."
-  printf '%s\n' "Firewall rules owned by other tools are not flushed."
+  printf '\n%s\n' "This deletes the program, saved tunnels, keys, logs, and Tunnel Manager WireGuard configs."
+  printf '%s\n' "A missing file is skipped. Other firewall rules and the wireguard and haproxy packages stay."
   if ! tm_confirm "Uninstall Tunnel Manager?"; then
     tm_info "Uninstall was not started."
     return 0
   fi
-  if tm_confirm "Also delete saved tunnels and keys?"; then
-    purge=(--purge-state)
-  fi
-  bash "$script" --prefix "$prefix" --yes "${purge[@]}"
+  bash "$script" --prefix "$prefix" --yes --purge-state
   exit 0
 }
 

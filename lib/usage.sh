@@ -72,7 +72,7 @@ Menu:
   2  Manage Tunnels. Public key, peer key, port forward, test, restart,
      delete, and maintenance.
   3  Update the program.
-  4  Uninstall. Firewall rules owned by other tools are not flushed.
+  4  Uninstall. One confirmation removes the program and all of its saved state.
   5  Enable BBR. Sets fq and bbr only. The default route is not changed.
 
 Global flags:

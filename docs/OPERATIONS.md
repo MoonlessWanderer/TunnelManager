@@ -155,7 +155,7 @@ transit.
    - Port forwards has add, edit, delete, list, and test.
    - Maintenance has status, troubleshoot, backup, restore, apply, dry-run, and rollback.
 3. Update reinstalls the program and keeps saved tunnels.
-4. Uninstall stops Tunnel Manager and does not flush other firewall rules.
+4. Uninstall asks once, then removes the program, saved tunnels, keys, logs, and `/etc/wireguard/tm-*.conf`. Missing paths are ignored. Other firewall rules are not flushed.
 5. Enable BBR. The plan sets `net.core.default_qdisc=fq` and
    `net.ipv4.tcp_congestion_control=bbr`. It does not change the default route.
 

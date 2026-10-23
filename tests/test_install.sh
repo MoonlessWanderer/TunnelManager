@@ -17,7 +17,7 @@ else
   tm_fail "tm does not open the menu"
 fi
 installed_version=$(bash "${prefix}/bin/tunnel-manager" version)
-tm_expect_eq "installed version" "$installed_version" "1.3.0"
+tm_expect_eq "installed version" "$installed_version" "1.3.1"
 bash "${TM_REPO}/uninstall.sh" --prefix "$prefix" --yes --skip-down
 if [[ ! -e "${prefix}/bin/tunnel-manager" && ! -e "${prefix}/bin/tm" && ! -e "${prefix}/lib/tunnel-manager" ]]; then
   tm_pass "uninstall removes installed files"
@@ -48,6 +48,35 @@ else
   tm_fail "update did not reinstall the program"
 fi
 unset TM_UPDATE_ARCHIVE TM_PREFIX
+purge="${TM_TEST_ROOT}/purge"
+etc="${purge}/etc/tunnel-manager"
+var="${purge}/var/tunnel-manager"
+log="${purge}/log/tunnel-manager"
+run="${purge}/run/tunnel-manager"
+wg="${purge}/wireguard"
+fwd="${purge}/99-tunnel-manager.conf"
+bbr="${purge}/98-tunnel-manager-bbr.conf"
+prefix_purge="${purge}/prefix"
+mkdir -p -- "$etc/keys" "$var" "$log" "$run" "$wg" "$prefix_purge"
+printf 'secret\n' >"$etc/keys/edge.key"
+printf 'tunnel\n' >"$wg/tm-edge.conf"
+printf 'keep\n' >"$wg/wg0.conf"
+printf 'managed\n' >"$fwd"
+TM_TEST_MODE=1 TM_TEST_ROOT="$purge" \
+  TM_ETC="$etc" TM_VAR="$var" TM_LOG_DIR="$log" TM_RUN="$run" TM_WG_DIR="$wg" \
+  TM_SYSCTL_FILE="$fwd" TM_BBR_FILE="$bbr" \
+  bash "${TM_REPO}/uninstall.sh" --prefix "$prefix_purge" --yes --purge-state --skip-down
+if [[ ! -e "$etc" && ! -e "$var" && ! -e "$log" && ! -e "$run" && ! -e "$wg/tm-edge.conf" && ! -e "$fwd" && ! -e "$bbr" && -f "$wg/wg0.conf" ]]; then
+  tm_pass "purge removes tunnel manager state and keeps other wireguard configs"
+else
+  tm_fail "purge did not remove only tunnel manager state"
+fi
+if grep -q -- '--purge-state' "${TM_REPO}/lib/menu.sh" && ! grep -q 'Also delete saved tunnels' "${TM_REPO}/lib/menu.sh"; then
+  tm_pass "menu uninstall deletes saved state after one confirmation"
+else
+  tm_fail "menu uninstall still asks a second question or skips purge"
+fi
+
 if grep -q 'Configure a New Tunnel' "${TM_REPO}/lib/menu.sh" \
   && grep -q 'Enable BBR' "${TM_REPO}/lib/menu.sh" \
   && grep -q 'Enter your choice' "${TM_REPO}/lib/menu.sh"; then
