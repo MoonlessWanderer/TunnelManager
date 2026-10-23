@@ -182,7 +182,8 @@ tm_menu_create_tunnel() {
   else
     tm_prompt cidr "Prefix length" "30" || return 1
   fi
-  tm_prompt wan "WAN interface" "$wan" || return 1
+  wan=$(tm_detect_wan "$wan" "$local_pub" "$remote_pub" || true)
+  tm_menu_apply_iface wan || return 1
   if [[ "$type" == "wireguard" ]]; then
     tm_prompt peer "Peer public key, or '-' to generate a pending tunnel" "-" || return 1
     if [[ "$peer" == "-" ]]; then
@@ -231,6 +232,42 @@ tm_menu_quick_forward() {
   tm_action_forward_add --name "$name" --proto "$proto" --listen-port "$port" --tunnel "$tunnel"
 }
 
+tm_menu_apply_iface() {
+  local -n _tm_iface=$1
+  local choice="" iface_list=""
+  choice="${_tm_iface}"
+  while true; do
+    tm_prompt choice "WAN interface" "$choice" || return 1
+    if tm_valid_iface "$choice" && tm_menu_iface_present "$choice"; then
+      _tm_iface="$choice"
+      return 0
+    fi
+    if tm_valid_iface "$choice"; then
+      tm_warn "Interface ${choice} is not present on this server."
+    else
+      tm_warn "A WAN interface name is required."
+    fi
+    iface_list=$(tm_list_ifaces | tr '\n' ' ' || true)
+    iface_list=${iface_list%" "}
+    if [[ -n "$iface_list" ]]; then
+      tm_info "Interfaces: ${iface_list}"
+    fi
+    choice=""
+  done
+}
+
+tm_menu_iface_present() {
+  local iface="$1"
+  if [[ "${TM_TEST_MODE:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -d /sys/class/net ]]; then
+    [[ -e "/sys/class/net/${iface}" ]]
+    return $?
+  fi
+  return 0
+}
+
 tm_menu_quick_setup() {
   local role="" local_pub="" remote_pub="" wan="" peer="" ssh_port=""
   local local_tun="" remote_tun=""
@@ -261,10 +298,11 @@ tm_menu_quick_setup() {
   esac
   tm_prompt local_pub "This server reachable IP" "$local_pub" || return 1
   tm_prompt remote_pub "Other server reachable IP" || return 1
-  tm_prompt wan "WAN interface" "$wan" || return 1
+  wan=$(tm_detect_wan "$wan" "$local_pub" "$remote_pub" || true)
+  tm_menu_apply_iface wan || return 1
   tm_prompt peer "Other server public key, or Enter if you do not have it yet" "-" || return 1
   printf '\n%s\n' "WireGuard edge will use ${local_tun} on this server and ${remote_tun} on the other."
-  printf '%s\n' "Listen port 51820, prefix 30, and the WAN interface are filled in automatically."
+  printf '%s\n' "Listen port 51820 and prefix 30 are filled in automatically. WAN interface is ${wan}."
   if [[ ! -f "$(tm_host_file)" ]]; then
     tm_action_init --role "$role" --public-ip "$local_pub" --wan-iface "$wan" --ssh-port "$ssh_port"
   fi

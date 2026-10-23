@@ -6,7 +6,7 @@ tm_test_reset
 
 bin="${TM_REPO}/bin/tunnel-manager"
 version=$(bash "$bin" version)
-tm_expect_eq "version" "$version" "1.4.0"
+tm_expect_eq "version" "$version" "1.4.1"
 bash "$bin" help >/dev/null
 tm_pass "help exits successfully"
 

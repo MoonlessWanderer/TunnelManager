@@ -54,20 +54,143 @@ tm_iface_exists() {
   [[ -e "/sys/class/net/${iface}" ]]
 }
 
-tm_detect_default_iface() {
-  local line
+tm_route_dev() {
+  local line="$1"
   local -a parts=()
-  local i
-  line=$(tm_run_quiet ip -4 route show default 2>/dev/null | head -n 1 || true)
+  local i token
   [[ -n "$line" ]] || return 1
   read -r -a parts <<<"$line"
   for ((i = 0; i < ${#parts[@]}; i++)); do
-    if [[ "${parts[$i]}" == "dev" && -n "${parts[$((i + 1))]:-}" ]]; then
-      printf '%s\n' "${parts[$((i + 1))]}"
-      return 0
+    if [[ "${parts[$i]}" != "dev" ]]; then
+      continue
     fi
+    token="${parts[$((i + 1))]:-}"
+    token=${token%%@*}
+    token=${token//\\/}
+    tm_valid_iface "$token" || return 1
+    printf '%s\n' "$token"
+    return 0
   done
   return 1
+}
+
+tm_detect_default_iface() {
+  local line dev
+  while IFS= read -r line; do
+    dev=$(tm_route_dev "$line" || true)
+    if [[ -n "$dev" ]]; then
+      printf '%s\n' "$dev"
+      return 0
+    fi
+  done < <(tm_run_quiet ip -4 route show default 2>/dev/null || true)
+  while IFS= read -r line; do
+    [[ "$line" == default* ]] || continue
+    dev=$(tm_route_dev "$line" || true)
+    if [[ -n "$dev" ]]; then
+      printf '%s\n' "$dev"
+      return 0
+    fi
+  done < <(tm_run_quiet ip -4 route show 2>/dev/null || true)
+  return 1
+}
+
+tm_addr_show_iface() {
+  local line="$1"
+  local rest iface
+  [[ "$line" == *:* ]] || return 1
+  rest=${line#*:}
+  rest=${rest#"${rest%%[![:space:]]*}"}
+  iface=${rest%%[[:space:]]*}
+  iface=${iface%%@*}
+  iface=${iface//\\/}
+  tm_valid_iface "$iface" || return 1
+  printf '%s\n' "$iface"
+}
+
+tm_detect_egress_iface() {
+  local dest="$1"
+  local family flag line dev
+  family=$(tm_ip_family "$dest") || return 1
+  case "$family" in
+    4) flag=-4 ;;
+    6) flag=-6 ;;
+    *) return 1 ;;
+  esac
+  while IFS= read -r line; do
+    dev=$(tm_route_dev "$line" || true)
+    if [[ -n "$dev" ]]; then
+      printf '%s\n' "$dev"
+      return 0
+    fi
+  done < <(tm_run_quiet ip "$flag" route get "$dest" 2>/dev/null || true)
+  return 1
+}
+
+tm_detect_iface_for_ip() {
+  local want="$1"
+  local line iface
+  tm_ip_is_unicast_host "$want" || return 1
+  if [[ "$(tm_ip_family "$want")" == "4" ]]; then
+    while IFS= read -r line; do
+      [[ "$line" == *" inet ${want}/"* || "$line" == *" inet ${want} "* ]] || continue
+      iface=$(tm_addr_show_iface "$line" || true)
+      if [[ -n "$iface" ]]; then
+        printf '%s\n' "$iface"
+        return 0
+      fi
+    done < <(tm_run_quiet ip -o -4 addr show 2>/dev/null || true)
+  fi
+  tm_detect_egress_iface "$want"
+}
+
+tm_detect_wan() {
+  local hinted="${1:-}"
+  local local_ip="${2:-}"
+  local remote_ip="${3:-}"
+  local found=""
+  if tm_valid_iface "$hinted"; then
+    printf '%s\n' "$hinted"
+    return 0
+  fi
+  found=$(tm_detect_default_iface || true)
+  if tm_valid_iface "$found"; then
+    printf '%s\n' "$found"
+    return 0
+  fi
+  if [[ -n "$local_ip" ]]; then
+    found=$(tm_detect_iface_for_ip "$local_ip" || true)
+    if tm_valid_iface "$found"; then
+      printf '%s\n' "$found"
+      return 0
+    fi
+  fi
+  if [[ -n "$remote_ip" ]]; then
+    found=$(tm_detect_egress_iface "$remote_ip" || true)
+    if tm_valid_iface "$found"; then
+      printf '%s\n' "$found"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+tm_list_ifaces() {
+  local path name line
+  if [[ -d /sys/class/net ]]; then
+    for path in /sys/class/net/*; do
+      [[ -e "$path" ]] || continue
+      name=$(basename -- "$path")
+      [[ "$name" == "lo" ]] && continue
+      tm_valid_iface "$name" || continue
+      printf '%s\n' "$name"
+    done
+    return 0
+  fi
+  while IFS= read -r line; do
+    name=$(tm_addr_show_iface "$line" || true)
+    [[ -n "$name" && "$name" != "lo" ]] || continue
+    printf '%s\n' "$name"
+  done < <(tm_run_quiet ip -o link show 2>/dev/null || true)
 }
 
 tm_detect_iface_ipv4() {

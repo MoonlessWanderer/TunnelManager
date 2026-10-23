@@ -9,7 +9,7 @@ mkdir -p -- "$ROOT"
 touch "$LINKS" "$ADDRS"
 printf '%s\n' "$*" >>"$LOG"
 
-if [[ "${1:-}" == "-4" ]]; then
+if [[ "${1:-}" == "-4" || "${1:-}" == "-6" ]]; then
   shift
 fi
 if [[ "${1:-}" == "-o" ]]; then
@@ -19,9 +19,22 @@ fi
 case "${1:-}" in
   route)
     case "${2:-}" in
-      show|list|get)
-        if [[ "${3:-}" == "default" || "${2:-}" == "show" ]]; then
-          printf '%s\n' "default via 192.0.2.1 dev eth0 proto dhcp src 192.0.2.10"
+      show|list)
+        if [[ -f "${ROOT}/ip.no-default" ]]; then
+          if [[ "${3:-}" == "default" ]]; then
+            exit 0
+          fi
+          printf '%s\n' "192.0.2.0/24 dev eth0 proto kernel scope link src 192.0.2.10"
+          exit 0
+        fi
+        printf '%s\n' "default via 192.0.2.1 dev eth0 proto dhcp src 192.0.2.10"
+        exit 0
+        ;;
+      get)
+        if [[ "${3:-}" == "default" || -z "${3:-}" ]]; then
+          printf '%s\n' "default via 192.0.2.1 dev eth0 src 192.0.2.10"
+        else
+          printf '%s via 192.0.2.1 dev eth0 src 192.0.2.10\n' "${3}"
         fi
         exit 0
         ;;
