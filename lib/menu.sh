@@ -165,16 +165,60 @@ tm_menu_test_forward() {
   tm_menu_run tm_action_forward_test --name "$name"
 }
 
+tm_menu_prefill_uplink() {
+  local -n _tm_wan=$1
+  local -n _tm_ip=$2
+  local picked="" iface="" ip=""
+  if ! tm_valid_iface "${_tm_wan}"; then
+    _tm_wan=$(tm_detect_default_iface || true)
+  fi
+  if ! tm_valid_iface "${_tm_wan}"; then
+    _tm_wan=$(tm_detect_sole_iface || true)
+  fi
+  picked=$(tm_detect_reachable_addr || true)
+  if [[ "$picked" == *" "* ]]; then
+    iface=${picked%% *}
+    ip=${picked#* }
+    if ! tm_valid_iface "${_tm_wan}"; then
+      _tm_wan="$iface"
+    fi
+    if ! tm_ip_is_unicast_host "${_tm_ip}" && { [[ -z "${_tm_wan}" ]] || [[ "${_tm_wan}" == "$iface" ]]; }; then
+      _tm_ip="$ip"
+    fi
+  fi
+  if tm_valid_iface "${_tm_wan}" && ! tm_ip_is_unicast_host "${_tm_ip}"; then
+    _tm_ip=$(tm_detect_iface_ipv4 "${_tm_wan}" || true)
+  fi
+}
+
+tm_menu_prompt_host_ip() {
+  local -n _tm_ip=$1
+  local label="$2"
+  local other="${3:-}"
+  local choice=""
+  choice="${_tm_ip}"
+  while true; do
+    tm_prompt choice "$label" "$choice" || return 1
+    if tm_ip_is_unicast_host "$choice" && [[ "$choice" != "$other" ]]; then
+      _tm_ip="$choice"
+      return 0
+    fi
+    if [[ -n "$other" && "$choice" == "$other" ]]; then
+      tm_warn "The two servers need different reachable addresses."
+    else
+      tm_warn "A reachable public IPv4 or IPv6 address is required."
+    fi
+    choice=""
+  done
+}
+
 tm_menu_create_tunnel() {
   local name="" type="" local_pub="" remote_pub="" local_tun="" remote_tun="" wan="" peer="" cidr="30"
-  wan=$(tm_detect_default_iface || true)
-  if [[ -n "$wan" ]]; then
-    local_pub=$(tm_detect_iface_ipv4 "$wan" || true)
-  fi
+  tm_menu_prefill_uplink wan local_pub
   tm_prompt name "Tunnel name" "edge" || return 1
   tm_prompt type "Type: wireguard or gre" "wireguard" || return 1
-  tm_prompt local_pub "Local reachable IPv4 or IPv6" "$local_pub" || return 1
-  tm_prompt remote_pub "Remote reachable IPv4 or IPv6" || return 1
+  tm_menu_prompt_host_ip local_pub "Local reachable IPv4 or IPv6" || return 1
+  tm_menu_prompt_host_ip remote_pub "Remote reachable IPv4 or IPv6" "$local_pub" || return 1
   tm_prompt local_tun "Local tunnel IP" || return 1
   tm_prompt remote_tun "Remote tunnel IP" || return 1
   if [[ "$local_tun" == *:* ]]; then
@@ -271,10 +315,7 @@ tm_menu_iface_present() {
 tm_menu_quick_setup() {
   local role="" local_pub="" remote_pub="" wan="" peer="" ssh_port=""
   local local_tun="" remote_tun=""
-  wan=$(tm_detect_default_iface || true)
-  if [[ -n "$wan" ]]; then
-    local_pub=$(tm_detect_iface_ipv4 "$wan" || true)
-  fi
+  tm_menu_prefill_uplink wan local_pub
   ssh_port=$(tm_menu_ssh_port)
   if [[ -f "$(tm_tunnel_file edge)" ]]; then
     tm_info "Tunnel edge already exists. Its public key is printed below."
@@ -296,8 +337,8 @@ tm_menu_quick_setup() {
       tm_die "Role must be iran or foreign."
       ;;
   esac
-  tm_prompt local_pub "This server reachable IP" "$local_pub" || return 1
-  tm_prompt remote_pub "Other server reachable IP" || return 1
+  tm_menu_prompt_host_ip local_pub "This server reachable IP" || return 1
+  tm_menu_prompt_host_ip remote_pub "Other server reachable IP" "$local_pub" || return 1
   wan=$(tm_detect_wan "$wan" "$local_pub" "$remote_pub" || true)
   tm_menu_apply_iface wan || return 1
   tm_prompt peer "Other server public key, or Enter if you do not have it yet" "-" || return 1

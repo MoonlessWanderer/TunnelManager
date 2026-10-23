@@ -145,9 +145,10 @@ transit.
 1. Configure a New Tunnel
    - Quick WireGuard setup asks which side this server is and the two reachable
      addresses. It uses tunnel name `edge`, inner addresses `10.200.0.1` and
-     `10.200.0.2`, and listen port 51820. The WAN interface comes from the
-     default route, or from the interface that owns this server's reachable
-     address when that route is in another table. An empty name is asked again.
+     `10.200.0.2`, and listen port 51820. This server's reachable address and
+     WAN interface are taken from the default route, or from the only network
+     interface when that route is hidden. Enter accepts a shown default. An
+     empty address or interface is asked again.
    - Advanced tunnel asks for every address.
 2. Manage Tunnels
    - Show the public key, paste the other server's key, or forward a port.

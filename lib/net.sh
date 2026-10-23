@@ -143,33 +143,133 @@ tm_detect_iface_for_ip() {
   tm_detect_egress_iface "$want"
 }
 
+tm_ipv4_is_private() {
+  local ip="$1"
+  local o1 o2
+  tm_valid_ipv4 "$ip" || return 1
+  o1=${ip%%.*}
+  o2=${ip#*.}
+  o2=${o2%%.*}
+  if [[ "$o1" == "10" ]]; then
+    return 0
+  fi
+  if [[ "$o1" == "192" && "$o2" == "168" ]]; then
+    return 0
+  fi
+  if [[ "$o1" == "172" && "$o2" -ge 16 && "$o2" -le 31 ]]; then
+    return 0
+  fi
+  if [[ "$o1" == "169" && "$o2" == "254" ]]; then
+    return 0
+  fi
+  if [[ "$o1" == "100" && "$o2" -ge 64 && "$o2" -le 127 ]]; then
+    return 0
+  fi
+  return 1
+}
+
+tm_addr_line_ipv4() {
+  local line="$1"
+  local -a parts=()
+  local i ip
+  [[ "$line" == *" inet "* ]] || return 1
+  read -r -a parts <<<"$line"
+  for ((i = 0; i < ${#parts[@]}; i++)); do
+    if [[ "${parts[$i]}" != "inet" ]]; then
+      continue
+    fi
+    ip="${parts[$((i + 1))]:-}"
+    ip=${ip%%/*}
+    tm_valid_ipv4 "$ip" || return 1
+    printf '%s\n' "$ip"
+    return 0
+  done
+  return 1
+}
+
+tm_pick_reachable_lines() {
+  local line iface ip
+  local -a public_addrs=() private_addrs=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+    iface=$(tm_addr_show_iface "$line" || true)
+    [[ -n "$iface" && "$iface" != "lo" ]] || continue
+    ip=$(tm_addr_line_ipv4 "$line" || true)
+    tm_ipv4_is_unicast_host "$ip" || continue
+    [[ "$ip" == 169.254.* ]] && continue
+    if tm_ipv4_is_private "$ip"; then
+      private_addrs+=("${iface} ${ip}")
+    else
+      public_addrs+=("${iface} ${ip}")
+    fi
+  done
+  if [[ "${#public_addrs[@]}" -ge 1 ]]; then
+    printf '%s\n' "${public_addrs[0]}"
+    return 0
+  fi
+  if [[ "${#private_addrs[@]}" -ge 1 ]]; then
+    printf '%s\n' "${private_addrs[0]}"
+    return 0
+  fi
+  return 1
+}
+
+tm_detect_reachable_addr() {
+  tm_run_quiet ip -o -4 addr show 2>/dev/null | tm_pick_reachable_lines
+}
+
+tm_detect_sole_iface() {
+  local -a iface_names=()
+  local name
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    iface_names+=("$name")
+    if [[ "${#iface_names[@]}" -gt 1 ]]; then
+      return 1
+    fi
+  done < <(tm_list_ifaces)
+  [[ "${#iface_names[@]}" -eq 1 ]] || return 1
+  printf '%s\n' "${iface_names[0]}"
+}
+
 tm_detect_wan() {
   local hinted="${1:-}"
   local local_ip="${2:-}"
   local remote_ip="${3:-}"
-  local found=""
+  local chosen=""
   if tm_valid_iface "$hinted"; then
     printf '%s\n' "$hinted"
     return 0
   fi
-  found=$(tm_detect_default_iface || true)
-  if tm_valid_iface "$found"; then
-    printf '%s\n' "$found"
+  chosen=$(tm_detect_default_iface || true)
+  if tm_valid_iface "$chosen"; then
+    printf '%s\n' "$chosen"
     return 0
   fi
   if [[ -n "$local_ip" ]]; then
-    found=$(tm_detect_iface_for_ip "$local_ip" || true)
-    if tm_valid_iface "$found"; then
-      printf '%s\n' "$found"
+    chosen=$(tm_detect_iface_for_ip "$local_ip" || true)
+    if tm_valid_iface "$chosen"; then
+      printf '%s\n' "$chosen"
       return 0
     fi
   fi
   if [[ -n "$remote_ip" ]]; then
-    found=$(tm_detect_egress_iface "$remote_ip" || true)
-    if tm_valid_iface "$found"; then
-      printf '%s\n' "$found"
+    chosen=$(tm_detect_egress_iface "$remote_ip" || true)
+    if tm_valid_iface "$chosen"; then
+      printf '%s\n' "$chosen"
       return 0
     fi
+  fi
+  chosen=$(tm_detect_sole_iface || true)
+  if tm_valid_iface "$chosen"; then
+    printf '%s\n' "$chosen"
+    return 0
+  fi
+  chosen=$(tm_detect_reachable_addr || true)
+  chosen=${chosen%% *}
+  if tm_valid_iface "$chosen"; then
+    printf '%s\n' "$chosen"
+    return 0
   fi
   return 1
 }
@@ -195,13 +295,23 @@ tm_list_ifaces() {
 
 tm_detect_iface_ipv4() {
   local iface="$1"
-  local line ip
-  line=$(tm_run_quiet ip -4 -o addr show dev "$iface" 2>/dev/null | head -n 1 || true)
-  [[ -n "$line" ]] || return 1
-  ip=${line#* inet }
-  ip=${ip%%/*}
-  tm_ipv4_is_unicast_host "$ip" || return 1
-  printf '%s\n' "$ip"
+  local line ip picked=""
+  tm_valid_iface "$iface" || return 1
+  while IFS= read -r line; do
+    ip=$(tm_addr_line_ipv4 "$line" || true)
+    tm_ipv4_is_unicast_host "$ip" || continue
+    [[ "$ip" == 169.254.* ]] && continue
+    if ! tm_ipv4_is_private "$ip"; then
+      printf '%s\n' "$ip"
+      return 0
+    fi
+    [[ -n "$picked" ]] || picked="$ip"
+  done < <(tm_run_quiet ip -4 addr show dev "$iface" 2>/dev/null || true)
+  if [[ -n "$picked" ]]; then
+    printf '%s\n' "$picked"
+    return 0
+  fi
+  return 1
 }
 
 tm_any_forward() {

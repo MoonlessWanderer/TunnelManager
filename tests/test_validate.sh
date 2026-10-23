@@ -69,5 +69,13 @@ touch "${TM_FAKE_ROOT}/ip.no-default"
 tm_expect_fail "missing main default route" tm_detect_default_iface
 tm_expect_eq "wan follows the reachable address" "$(tm_detect_wan '' 31.184.244.31 87.107.112.226)" "eth0"
 rm -f -- "${TM_FAKE_ROOT}/ip.no-default"
+picked=$(printf '%s\n' \
+  '1: lo    inet 127.0.0.1/8 scope host lo' \
+  '2: enp3s0    inet 10.1.2.3/24 scope global enp3s0' \
+  '2: enp3s0    inet 31.184.244.31/24 brd 31.184.244.255 scope global enp3s0' \
+  | tm_pick_reachable_lines)
+tm_expect_eq "public address is preferred" "$picked" "enp3s0 31.184.244.31"
+picked=$(printf '%s\n' '2: enp3s0    inet 10.1.2.3/24 scope global enp3s0' | tm_pick_reachable_lines)
+tm_expect_eq "private address is used when it is the only one" "$picked" "enp3s0 10.1.2.3"
 
 tm_finish
