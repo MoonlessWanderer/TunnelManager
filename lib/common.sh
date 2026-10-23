@@ -13,7 +13,7 @@ if [[ -n "${TM_COMMON_LOADED:-}" ]]; then
 fi
 TM_COMMON_LOADED=1
 
-TM_VERSION="1.4.3"
+TM_VERSION="1.4.4"
 
 tm_version() {
   printf '%s\n' "$TM_VERSION"
@@ -60,6 +60,9 @@ tm_debug() { tm_log DEBUG "$@"; }
 
 tm_die() {
   tm_error "$*"
+  if [[ ! -t 2 ]] && [[ -w /dev/tty ]]; then
+    printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ) ERROR $*" >/dev/tty || true
+  fi
   exit 1
 }
 

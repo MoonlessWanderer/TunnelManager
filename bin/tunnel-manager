@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 # Tunnel Manager entry point.
 set -euo pipefail
-IFS=$'\n\t'
 
 tm_resolve_lib_dir() {
   if [[ -n "${TM_LIB_DIR:-}" ]]; then

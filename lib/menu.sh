@@ -99,7 +99,7 @@ tm_menu_default_tunnel() {
 tm_menu_ssh_port() {
   local -a fields=()
   if [[ -n "${SSH_CONNECTION:-}" ]]; then
-    read -r -a fields <<<"${SSH_CONNECTION}"
+    IFS=$' \t\n' read -r -a fields <<<"${SSH_CONNECTION}"
     if [[ "${#fields[@]}" -ge 4 ]] && tm_valid_port "${fields[3]}"; then
       printf '%s\n' "${fields[3]}"
       return 0

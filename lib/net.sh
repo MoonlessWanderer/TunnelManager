@@ -59,7 +59,7 @@ tm_route_dev() {
   local -a parts=()
   local i token
   [[ -n "$line" ]] || return 1
-  read -r -a parts <<<"$line"
+  IFS=$' \t\n' read -r -a parts <<<"$line"
   for ((i = 0; i < ${#parts[@]}; i++)); do
     if [[ "${parts[$i]}" != "dev" ]]; then
       continue
@@ -173,7 +173,7 @@ tm_addr_line_ipv4() {
   local -a parts=()
   local i ip
   [[ "$line" == *" inet "* ]] || return 1
-  read -r -a parts <<<"$line"
+  IFS=$' \t\n' read -r -a parts <<<"$line"
   for ((i = 0; i < ${#parts[@]}; i++)); do
     if [[ "${parts[$i]}" != "inet" ]]; then
       continue

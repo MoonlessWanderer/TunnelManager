@@ -40,7 +40,7 @@ if [[ -s "${TM_FAKE_ROOT}/nft.log" ]]; then
 else
   tm_pass "iptables apply does not invoke nft"
 fi
-tm_expect_ok "udp delete" tm_iptables_udp_delete_exec edge
+IFS=$'\n\t' tm_expect_ok "udp delete" tm_iptables_udp_delete_exec edge
 tm_expect_ok "iptables tcp apply" tm_iptables_l4_apply_exec tcp web eth0 443 10.200.0.2 443 10.200.0.1 no
 if grep -q -- '-p tcp --dport 443' "${TM_FAKE_ROOT}/iptables.log"; then
   tm_pass "iptables tcp DNAT is installed"

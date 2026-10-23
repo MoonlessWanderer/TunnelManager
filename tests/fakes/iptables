@@ -75,6 +75,17 @@ print_rules() {
   while IFS= read -r line; do
     [[ "$line" == RULE$'\t'"${t}"$'\t'"${c}"$'\t'* ]] || continue
     spec=${line#RULE$'\t'"${t}"$'\t'"${c}"$'\t'}
+    # iptables-nft prints the implicit protocol match and quotes the comment.
+    if [[ "$spec" == *-p\ udp\ * && "$spec" != *-m\ udp\ * ]]; then
+      spec=${spec/-p udp /-p udp -m udp }
+    fi
+    if [[ "$spec" == *-p\ tcp\ * && "$spec" != *-m\ tcp\ * ]]; then
+      spec=${spec/-p tcp /-p tcp -m tcp }
+    fi
+    if [[ "$spec" == *'--comment '* && "$spec" != *'--comment "'* ]]; then
+      spec=${spec/--comment /--comment \"}
+      spec=${spec/ -j /\" -j }
+    fi
     printf -- '-A %s %s\n' "$c" "$spec"
   done <"$STATE"
 }

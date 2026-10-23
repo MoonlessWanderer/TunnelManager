@@ -275,7 +275,31 @@ tm_iptables_delete_parsed() {
     tm_error "The saved iptables rule for ${comment} cannot be deleted safely."
     return 1
   fi
-  tm_must "$bin" -t "$table" -D "$chain" "$@"
+  if tm_run "$bin" -t "$table" -D "$chain" "$@"; then
+    return 0
+  fi
+  # iptables -S inserts -m udp or -m tcp. Some releases do not delete a rule
+  # when that implicit match is repeated on the -D command.
+  local -a plain=()
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "-m" || "$1" == "--match" ]]; then
+      case "${2:-}" in
+        udp|tcp)
+          shift 2
+          continue
+          ;;
+      esac
+    fi
+    plain+=("$1")
+    shift
+  done
+  if [[ "${#plain[@]}" -gt 0 ]] && tm_argv_is_safe "$bin" -t "$table" -D "$chain" "${plain[@]}"; then
+    if tm_run "$bin" -t "$table" -D "$chain" "${plain[@]}"; then
+      return 0
+    fi
+  fi
+  tm_warn "Firewall rule ${comment} was not removed. Cleanup will continue."
+  return 0
 }
 
 tm_iptables_delete_comment() {
@@ -313,7 +337,7 @@ tm_iptables_gc() {
     "filter TM_INPUT INPUT tm:jump:filter-input"
   )
   for row in "${rows[@]}"; do
-    read -r table chain from comment <<<"$row"
+    IFS=$' \t\n' read -r table chain from comment <<<"$row"
     tm_iptables_chain_exists "$table" "$chain" || continue
     if tm_iptables_chain_empty "$table" "$chain"; then
       tm_run_quiet iptables -t "$table" -D "$from" -m comment --comment "$comment" -j "$chain" >/dev/null 2>&1 || true

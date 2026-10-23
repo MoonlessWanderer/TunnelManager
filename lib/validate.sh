@@ -364,7 +364,7 @@ tm_ipv6_network() {
   local expanded i hextet result b global_bit bit_val out_bit padded
   local -a src=() masked=()
   expanded=$(tm_ipv6_expand "$ip") || return 1
-  read -r -a src <<<"$expanded"
+  IFS=$' \t\n' read -r -a src <<<"$expanded"
   for i in 0 1 2 3 4 5 6 7; do
     hextet=$((16#${src[i]}))
     result=0
@@ -463,7 +463,7 @@ tm_port_is_protected() {
   local -a fields=()
   [[ "$port" == "$ssh_port" ]] && return 0
   if [[ -n "${SSH_CONNECTION:-}" ]]; then
-    read -r -a fields <<<"${SSH_CONNECTION}"
+    IFS=$' \t\n' read -r -a fields <<<"${SSH_CONNECTION}"
     if [[ "${#fields[@]}" -ge 4 && "$port" == "${fields[3]}" ]]; then
       return 0
     fi
