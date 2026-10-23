@@ -65,7 +65,7 @@ tm_action_doctor() {
   else
     tm_doctor_warn "Not running as root. Changes will be refused."
   fi
-  for cmd in ip sysctl wg haproxy; do
+  for cmd in ip sysctl wg; do
     if tm_cmd_available "$cmd"; then
       tm_doctor_pass "Command ${cmd} is available."
     else
@@ -87,7 +87,7 @@ tm_action_doctor() {
     if [[ "$value" == "1" ]]; then
       tm_doctor_pass "net.ipv4.ip_forward is 1."
     else
-      tm_doctor_warn "net.ipv4.ip_forward is ${value:-unset}. UDP forwarding needs it; TCP HAProxy does not."
+      tm_doctor_warn "net.ipv4.ip_forward is ${value:-unset}. Port forwarding needs it."
     fi
   fi
   tm_doctor_ipv6_endpoint
@@ -97,13 +97,9 @@ tm_action_doctor() {
     tm_doctor_pass "No interrupted rollback journal."
   fi
   if [[ -f "$TM_HAPROXY_CFG" ]]; then
-    if tm_cmd_available haproxy && tm_exec haproxy -c -f "$TM_HAPROXY_CFG" >/dev/null 2>&1; then
-      tm_doctor_pass "HAProxy configuration passed haproxy -c."
-    else
-      tm_doctor_fail "HAProxy configuration failed validation."
-    fi
+    tm_doctor_warn "An old HAProxy configuration is present. Port forwarding uses the firewall."
   else
-    tm_doctor_pass "No HAProxy configuration is installed."
+    tm_doctor_pass "Port forwarding uses firewall NAT."
   fi
   local name
   local -A row=()

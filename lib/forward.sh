@@ -78,15 +78,12 @@ tm_forward_file_undo() {
   local name="$1"
   local proto="$2"
   local path
+  tm_l4_proto_ok "$proto" || return 1
   path=$(tm_forward_file "$name")
   if [[ -f "$path" ]]; then
     tm_safe_rm "$path" || return 1
   fi
-  if [[ "$proto" == "udp" ]]; then
-    tm_fw_udp_delete_exec "$name" || return 1
-  else
-    tm_haproxy_sync_exec || return 1
-  fi
+  tm_fw_forward_delete_exec "$name" || return 1
   tm_sysctl_sync_exec || return 1
 }
 
@@ -95,12 +92,7 @@ tm_forward_runtime_present() {
   local -A row=()
   local backend comment text
   tm_forward_load "$name" row || return 1
-  if [[ "${row[TM_FORWARD_PROTO]}" == "tcp" ]]; then
-    [[ -f "$TM_HAPROXY_CFG" ]] || return 1
-    grep -q "frontend $(tm_haproxy_ident "$name")_fe" "$TM_HAPROXY_CFG"
-    return
-  fi
-  comment=$(tm_fw_comment "udp:${name}:dnat")
+  comment=$(tm_fw_comment "${row[TM_FORWARD_PROTO]}:${name}:dnat")
   backend=$(tm_fw_active_backend) || return 1
   if [[ "$backend" == "iptables" ]]; then
     text=$(tm_iptables_chain_rules nat TM_PREROUTING || true)
@@ -143,14 +135,10 @@ tm_forward_apply_saved() {
   local -A row=()
   local decision="no" local_tun="" peer_tun=""
   tm_forward_load "$name" row || return 1
-  if [[ "${row[TM_FORWARD_PROTO]}" == "tcp" ]]; then
-    tm_haproxy_sync_exec || return 1
-    return 0
-  fi
   local_tun="${row[TM_SOURCE_IP]}"
   peer_tun="${row[TM_DEST_IP]}"
   decision=$(tm_fw_snat_decision "${row[TM_SNAT]}" "${row[TM_DEST_IP]}" "$local_tun" "$peer_tun") || return 1
-  tm_fw_udp_apply_exec "$name" "${row[TM_INGRESS_IFACE]}" "${row[TM_LISTEN_PORT]}" \
+  tm_fw_l4_apply_exec "${row[TM_FORWARD_PROTO]}" "$name" "${row[TM_INGRESS_IFACE]}" "${row[TM_LISTEN_PORT]}" \
     "${row[TM_DEST_IP]}" "${row[TM_DEST_PORT]}" "${row[TM_SOURCE_IP]}" "$decision" || return 1
 }
 
@@ -204,11 +192,9 @@ tm_forward_validate_common() {
     tm_error "Source and destination addresses must use the same IP family."
     return 1
   fi
-  if [[ "$proto" == "udp" ]]; then
-    if [[ "$(tm_ip_family "$dest_ip")" == "6" || "$(tm_ip_family "$listen_ip")" == "6" ]]; then
-      tm_error "UDP forwarding supports IPv4 only. TCP forwarding can use IPv6."
-      return 1
-    fi
+  if [[ "$(tm_ip_family "$dest_ip")" == "6" || "$(tm_ip_family "$source_ip")" == "6" || "$(tm_ip_family "$listen_ip")" == "6" ]]; then
+    tm_error "Port forwarding supports IPv4 only."
+    return 1
   fi
   tm_ssh_port >/dev/null
   if tm_port_is_protected "$listen_port"; then
@@ -267,18 +253,12 @@ tm_action_forward_add() {
   tm_plan_add "Write ${proto} forward '${name}' (${listen_ip}:${listen_port} -> ${dest_ip}:${dest_port}, snat ${snat})" \
     "$(tm_shell_quote tm_forward_file_undo "$name" "$proto")" \
     tm_forward_file_write_exec "$name" "$proto" "$listen_ip" "$listen_port" "$dest_ip" "$dest_port" "$snat" "$ingress" "$source_ip" "$tunnel_ref"
-  if [[ "$proto" == "udp" ]]; then
-    tm_plan_add "Install UDP DNAT ${ingress}:${listen_port} -> ${dest_ip}:${dest_port} (snat ${decision}) using dedicated chains" \
-      "$(tm_shell_quote tm_fw_udp_delete_exec "$name")" \
-      tm_fw_udp_apply_exec "$name" "$ingress" "$listen_port" "$dest_ip" "$dest_port" "$source_ip" "$decision"
-    tm_plan_add "Synchronize net.ipv4.ip_forward for saved UDP forwards" \
-      "$(tm_shell_quote tm_sysctl_sync_exec)" \
-      tm_sysctl_sync_exec
-  else
-    tm_plan_add "Validate HAProxy configuration and reload the dedicated Tunnel Manager instance" \
-      "$(tm_shell_quote tm_haproxy_sync_undo)" \
-      tm_haproxy_sync_exec
-  fi
+  tm_plan_add "Install ${proto} DNAT ${ingress}:${listen_port} -> ${dest_ip}:${dest_port} (snat ${decision}) using dedicated chains" \
+    "$(tm_shell_quote tm_fw_l4_delete_exec "$proto" "$name")" \
+    tm_fw_l4_apply_exec "$proto" "$name" "$ingress" "$listen_port" "$dest_ip" "$dest_port" "$source_ip" "$decision"
+  tm_plan_add "Synchronize net.ipv4.ip_forward for saved forwards" \
+    "$(tm_shell_quote tm_sysctl_sync_exec)" \
+    tm_sysctl_sync_exec
   tm_require_change_privileges
   tm_with_lock tm_plan_apply
 }
@@ -293,13 +273,10 @@ tm_forward_delete_exec() {
 tm_forward_delete_undo() {
   local name="$1"
   local proto="$2"
+  tm_l4_proto_ok "$proto" || return 1
   tm_restore_snapshot "$(tm_forward_file "$name")" || return 1
-  if [[ "$proto" == "udp" ]]; then
-    tm_forward_apply_saved "$name" || return 1
-    tm_sysctl_sync_exec || return 1
-  else
-    tm_haproxy_sync_exec || return 1
-  fi
+  tm_forward_apply_saved "$name" || return 1
+  tm_sysctl_sync_exec || return 1
 }
 
 tm_action_forward_delete() {
@@ -351,16 +328,11 @@ tm_action_forward_edit() {
 
 tm_forward_edit_undo() {
   local name="$1"
-  local proto
-  tm_fw_udp_delete_exec "$name" || return 1
+  tm_fw_forward_delete_exec "$name" || return 1
   tm_restore_snapshot "$(tm_forward_file "$name")" || return 1
   if [[ -f "$(tm_forward_file "$name")" ]]; then
-    proto=$(tm_forward_proto "$name") || return 1
-    if [[ "$proto" == "udp" ]]; then
-      tm_forward_apply_saved "$name" || return 1
-    fi
+    tm_forward_apply_saved "$name" || return 1
   fi
-  tm_haproxy_sync_exec || return 1
   tm_sysctl_sync_exec || return 1
 }
 
@@ -376,18 +348,12 @@ tm_forward_edit_exec() {
   local source_ip="$9"
   local tunnel_ref="${10}"
   local old_proto="${11}"
+  tm_l4_proto_ok "$old_proto" || return 1
   tm_snapshot_file "$(tm_forward_file "$name")" || return 1
   tm_forward_file_write_exec "$name" "$proto" "$listen_ip" "$listen_port" "$dest_ip" "$dest_port" "$snat" "$ingress" "$source_ip" "$tunnel_ref" || return 1
-  if [[ "$old_proto" == "udp" && "$proto" != "udp" ]]; then
-    tm_fw_udp_delete_exec "$name" || return 1
-  fi
-  if [[ "$proto" == "udp" ]]; then
-    tm_forward_apply_saved "$name" || return 1
-    tm_sysctl_sync_exec || return 1
-  else
-    tm_haproxy_sync_exec || return 1
-    tm_sysctl_sync_exec || return 1
-  fi
+  tm_fw_forward_delete_exec "$name" || return 1
+  tm_forward_apply_saved "$name" || return 1
+  tm_sysctl_sync_exec || return 1
 }
 
 tm_action_forward_list() {
@@ -420,21 +386,12 @@ tm_action_forward_test() {
   name="${opt[name]}"
   tm_forward_load "$name" row || tm_die "Forward ${name} was not found."
   tm_info "Forward ${name}: ${row[TM_FORWARD_PROTO]} ${row[TM_LISTEN_IP]}:${row[TM_LISTEN_PORT]} -> ${row[TM_DEST_IP]}:${row[TM_DEST_PORT]}"
-  if [[ "${row[TM_FORWARD_PROTO]}" == "tcp" ]]; then
-    if tm_cmd_available haproxy; then
-      if [[ -f "$TM_HAPROXY_CFG" ]] && tm_run haproxy -c -f "$TM_HAPROXY_CFG" >/dev/null 2>&1; then
-        tm_info "[PASS] HAProxy configuration is valid."
-      else
-        tm_error "[FAIL] HAProxy configuration is missing or invalid."
-        ok=1
-      fi
-    else
-      tm_warn "[WARN] haproxy is not available; configuration syntax was not checked."
-    fi
-    tm_info "TCP destination reachability is checked by HAProxy health checks after the service is running."
+  if tm_forward_runtime_present "$name"; then
+    tm_info "[PASS] Firewall DNAT rule is present."
   else
-    tm_info "UDP payload delivery cannot be confirmed without the application. Rule presence is checked by the firewall backend."
-    tm_warn "[WARN] End-to-end UDP success is not claimed by this test."
+    tm_warn "[WARN] Firewall DNAT rule is not present. Run apply to install it."
   fi
+  tm_info "Payload delivery cannot be confirmed without the application."
+  tm_warn "[WARN] End-to-end success is not claimed by this test."
   return "$ok"
 }

@@ -23,18 +23,16 @@ tm_apply_build_plan() {
   done < <(tm_list_tunnels)
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
-    if [[ "$(tm_forward_proto "$name" || true)" == "udp" ]]; then
-      tm_plan_add "Ensure UDP forward ${name} is installed in the firewall" \
-        "$(tm_shell_quote tm_forward_ensure_undo "$name")" \
-        tm_forward_ensure_exec "$name"
-    fi
+    tm_plan_add "Ensure forward ${name} is installed in the firewall" \
+      "$(tm_shell_quote tm_forward_ensure_undo "$name")" \
+      tm_forward_ensure_exec "$name"
   done < <(tm_list_forwards)
-  tm_plan_add "Synchronize IPv4 forwarding with saved UDP forwards" \
+  tm_plan_add "Synchronize IPv4 forwarding with saved forwards" \
     "$(tm_shell_quote tm_sysctl_sync_exec)" \
     tm_sysctl_sync_exec
-  tm_plan_add "Synchronize the dedicated HAProxy configuration for saved TCP forwards" \
-    "$(tm_shell_quote tm_haproxy_sync_undo)" \
-    tm_haproxy_sync_exec
+  tm_plan_add "Stop a leftover HAProxy forwarder" \
+    "$(tm_shell_quote tm_noop)" \
+    tm_haproxy_stop_exec
 }
 
 tm_action_apply() {
@@ -50,8 +48,8 @@ tm_action_apply() {
 tm_down_build_plan() {
   local name
   tm_plan_reset
-  tm_plan_add "Stop the dedicated HAProxy process" \
-    "$(tm_shell_quote tm_haproxy_sync_exec)" \
+  tm_plan_add "Stop a leftover HAProxy forwarder" \
+    "$(tm_shell_quote tm_noop)" \
     tm_haproxy_stop_exec
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
@@ -65,19 +63,14 @@ tm_down_build_plan() {
       "$(tm_shell_quote tm_tunnel_start_exec "$name")" \
       tm_tunnel_stop_exec "$name"
   done < <(tm_list_tunnels)
-  tm_plan_add "Leave saved sysctl drop-in in place when UDP forwards remain configured" \
+  tm_plan_add "Leave saved sysctl drop-in in place when forwards remain configured" \
     "$(tm_shell_quote tm_noop)" \
     tm_noop
 }
 
 tm_forward_down_exec() {
   local name="$1"
-  local proto
-  proto=$(tm_forward_proto "$name" || true)
-  if [[ "$proto" == "udp" ]]; then
-    tm_fw_udp_delete_exec "$name" || return 1
-  fi
-  return 0
+  tm_fw_forward_delete_exec "$name"
 }
 
 tm_action_down_all() {

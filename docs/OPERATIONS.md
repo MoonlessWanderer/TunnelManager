@@ -41,8 +41,7 @@ ready yet.
 
 An IPv6 tunnel uses the same commands. IPv4 inner prefixes are 24-31 and IPv6
 inner prefixes are 64-127. Leave `--cidr` unset to get 30 or 64 from the
-address family. UDP forwarding still requires IPv4. TCP forwarding accepts
-an IPv6 destination.
+address family. Port forwarding is IPv4 for both TCP and UDP.
 
 ```bash
 sudo tm
@@ -74,9 +73,8 @@ sudo tunnel-manager forward add --name dns --proto udp --listen-port 5300 \
   --dest-ip 10.200.0.2 --dest-port 53 --source-ip 10.200.0.1 --ingress-iface eth0 --snat auto
 ```
 
-`forward test` validates the HAProxy config for TCP. For UDP it checks that
-the saved forward and the firewall command exist. It does not claim an
-end-to-end UDP success.
+`forward test` checks that the firewall DNAT rule is present. It does not
+claim end-to-end success for TCP or UDP.
 
 Edit and delete:
 
@@ -98,8 +96,9 @@ sudo tunnel-manager backup create --output /root/tm.tar.gz
 sudo tunnel-manager backup restore --file /root/tm.tar.gz
 ```
 
-`down` removes runtime interfaces, HAProxy, and UDP rules. It keeps the saved
-configuration. `apply` installs that configuration again.
+`down` removes runtime interfaces and TCP/UDP NAT rules, and stops a leftover
+HAProxy process. It keeps the saved configuration. `apply` installs that
+configuration again through the firewall.
 
 ## Firewall backend
 

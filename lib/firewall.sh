@@ -274,43 +274,62 @@ tm_iptables_gc() {
   done
 }
 
-tm_iptables_udp_apply_exec() {
-  local name="$1"
-  local iface="$2"
-  local lport="$3"
-  local dest_ip="$4"
-  local dest_port="$5"
-  local source_ip="$6"
-  local do_snat="$7"
+tm_l4_proto_ok() {
+  case "$1" in
+    tcp|udp) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+tm_iptables_l4_apply_exec() {
+  local proto="$1"
+  local name="$2"
+  local iface="$3"
+  local lport="$4"
+  local dest_ip="$5"
+  local dest_port="$6"
+  local source_ip="$7"
+  local do_snat="$8"
   local c_dnat c_snat c_fwd c_ret
-  c_dnat=$(tm_fw_comment "udp:${name}:dnat")
-  c_snat=$(tm_fw_comment "udp:${name}:snat")
-  c_fwd=$(tm_fw_comment "udp:${name}:fwd")
-  c_ret=$(tm_fw_comment "udp:${name}:fwdret")
+  tm_l4_proto_ok "$proto" || return 1
+  c_dnat=$(tm_fw_comment "${proto}:${name}:dnat")
+  c_snat=$(tm_fw_comment "${proto}:${name}:snat")
+  c_fwd=$(tm_fw_comment "${proto}:${name}:fwd")
+  c_ret=$(tm_fw_comment "${proto}:${name}:fwdret")
   tm_iptables_ensure_base || return 1
   tm_iptables_add_if_missing \
-    iptables -t nat -A TM_PREROUTING -i "$iface" -p udp --dport "$lport" \
+    iptables -t nat -A TM_PREROUTING -i "$iface" -p "$proto" --dport "$lport" \
     -m comment --comment "$c_dnat" -j DNAT --to-destination "${dest_ip}:${dest_port}" || return 1
   if [[ "$do_snat" == "yes" ]]; then
     tm_iptables_add_if_missing \
-      iptables -t nat -A TM_POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" \
+      iptables -t nat -A TM_POSTROUTING -p "$proto" -d "$dest_ip" --dport "$dest_port" \
       -m comment --comment "$c_snat" -j SNAT --to-source "$source_ip" || return 1
   fi
   tm_iptables_add_if_missing \
-    iptables -t filter -A TM_FORWARD -p udp -d "$dest_ip" --dport "$dest_port" \
+    iptables -t filter -A TM_FORWARD -p "$proto" -d "$dest_ip" --dport "$dest_port" \
     -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment "$c_fwd" -j ACCEPT || return 1
   tm_iptables_add_if_missing \
-    iptables -t filter -A TM_FORWARD -p udp -s "$dest_ip" --sport "$dest_port" \
+    iptables -t filter -A TM_FORWARD -p "$proto" -s "$dest_ip" --sport "$dest_port" \
     -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$c_ret" -j ACCEPT || return 1
 }
 
-tm_iptables_udp_delete_exec() {
-  local name="$1"
-  tm_iptables_delete_comment nat TM_PREROUTING "$(tm_fw_comment "udp:${name}:dnat")" || return 1
-  tm_iptables_delete_comment nat TM_POSTROUTING "$(tm_fw_comment "udp:${name}:snat")" || return 1
-  tm_iptables_delete_comment filter TM_FORWARD "$(tm_fw_comment "udp:${name}:fwd")" || return 1
-  tm_iptables_delete_comment filter TM_FORWARD "$(tm_fw_comment "udp:${name}:fwdret")" || return 1
+tm_iptables_udp_apply_exec() {
+  tm_iptables_l4_apply_exec udp "$@"
+}
+
+tm_iptables_l4_delete_exec() {
+  local proto="$1"
+  local name="$2"
+  tm_l4_proto_ok "$proto" || return 1
+  tm_iptables_delete_comment nat TM_PREROUTING "$(tm_fw_comment "${proto}:${name}:dnat")" || return 1
+  tm_iptables_delete_comment nat TM_POSTROUTING "$(tm_fw_comment "${proto}:${name}:snat")" || return 1
+  tm_iptables_delete_comment filter TM_FORWARD "$(tm_fw_comment "${proto}:${name}:fwd")" || return 1
+  tm_iptables_delete_comment filter TM_FORWARD "$(tm_fw_comment "${proto}:${name}:fwdret")" || return 1
   tm_iptables_gc || return 1
+}
+
+tm_iptables_udp_delete_exec() {
+  tm_iptables_l4_delete_exec udp "$1"
 }
 
 tm_iptables_input_apply_exec() {
@@ -416,36 +435,48 @@ tm_nft_delete_comment() {
   done < <(tm_nft_handles_for_comment "$text" "$comment")
 }
 
-tm_nft_udp_apply_exec() {
-  local name="$1"
-  local iface="$2"
-  local lport="$3"
-  local dest_ip="$4"
-  local dest_port="$5"
-  local source_ip="$6"
-  local do_snat="$7"
+tm_nft_l4_apply_exec() {
+  local proto="$1"
+  local name="$2"
+  local iface="$3"
+  local lport="$4"
+  local dest_ip="$5"
+  local dest_port="$6"
+  local source_ip="$7"
+  local do_snat="$8"
   local c_dnat c_snat c_fwd c_ret
-  c_dnat=$(tm_fw_comment "udp:${name}:dnat")
-  c_snat=$(tm_fw_comment "udp:${name}:snat")
-  c_fwd=$(tm_fw_comment "udp:${name}:fwd")
-  c_ret=$(tm_fw_comment "udp:${name}:fwdret")
+  tm_l4_proto_ok "$proto" || return 1
+  c_dnat=$(tm_fw_comment "${proto}:${name}:dnat")
+  c_snat=$(tm_fw_comment "${proto}:${name}:snat")
+  c_fwd=$(tm_fw_comment "${proto}:${name}:fwd")
+  c_ret=$(tm_fw_comment "${proto}:${name}:fwdret")
   tm_nft_ensure_base || return 1
-  tm_nft_add_rule prerouting "$c_dnat" iifname "$iface" udp dport "$lport" dnat to "${dest_ip}:${dest_port}" || return 1
+  tm_nft_add_rule prerouting "$c_dnat" iifname "$iface" "$proto" dport "$lport" dnat to "${dest_ip}:${dest_port}" || return 1
   if [[ "$do_snat" == "yes" ]]; then
-    tm_nft_add_rule postrouting "$c_snat" ip daddr "$dest_ip" udp dport "$dest_port" snat to "$source_ip" || return 1
+    tm_nft_add_rule postrouting "$c_snat" ip daddr "$dest_ip" "$proto" dport "$dest_port" snat to "$source_ip" || return 1
   fi
   if [[ "${TM_NFT_FILTER_OK:-0}" == "1" ]]; then
-    tm_nft_add_rule forward "$c_fwd" udp dport "$dest_port" ip daddr "$dest_ip" accept || return 1
-    tm_nft_add_rule forward "$c_ret" udp sport "$dest_port" ip saddr "$dest_ip" accept || return 1
+    tm_nft_add_rule forward "$c_fwd" "$proto" dport "$dest_port" ip daddr "$dest_ip" accept || return 1
+    tm_nft_add_rule forward "$c_ret" "$proto" sport "$dest_port" ip saddr "$dest_ip" accept || return 1
   fi
 }
 
+tm_nft_udp_apply_exec() {
+  tm_nft_l4_apply_exec udp "$@"
+}
+
+tm_nft_l4_delete_exec() {
+  local proto="$1"
+  local name="$2"
+  tm_l4_proto_ok "$proto" || return 1
+  tm_nft_delete_comment prerouting "$(tm_fw_comment "${proto}:${name}:dnat")" || return 1
+  tm_nft_delete_comment postrouting "$(tm_fw_comment "${proto}:${name}:snat")" || return 1
+  tm_nft_delete_comment forward "$(tm_fw_comment "${proto}:${name}:fwd")" || return 1
+  tm_nft_delete_comment forward "$(tm_fw_comment "${proto}:${name}:fwdret")" || return 1
+}
+
 tm_nft_udp_delete_exec() {
-  local name="$1"
-  tm_nft_delete_comment prerouting "$(tm_fw_comment "udp:${name}:dnat")" || return 1
-  tm_nft_delete_comment postrouting "$(tm_fw_comment "udp:${name}:snat")" || return 1
-  tm_nft_delete_comment forward "$(tm_fw_comment "udp:${name}:fwd")" || return 1
-  tm_nft_delete_comment forward "$(tm_fw_comment "udp:${name}:fwdret")" || return 1
+  tm_nft_l4_delete_exec udp "$1"
 }
 
 tm_nft_input_apply_exec() {
@@ -473,12 +504,15 @@ tm_nft_input_delete_exec() {
   tm_nft_delete_comment input "$(tm_fw_comment "${kind}:${name}:input")"
 }
 
-tm_fw_udp_apply_exec() {
+tm_fw_l4_apply_exec() {
+  local proto="$1"
+  shift
   local backend
+  tm_l4_proto_ok "$proto" || return 1
   backend=$(tm_fw_active_backend) || return 1
   case "$backend" in
-    iptables) tm_iptables_udp_apply_exec "$@" ;;
-    nft) tm_nft_udp_apply_exec "$@" ;;
+    iptables) tm_iptables_l4_apply_exec "$proto" "$@" ;;
+    nft) tm_nft_l4_apply_exec "$proto" "$@" ;;
     *)
       tm_error "Unsupported firewall backend: ${backend}"
       return 1
@@ -486,15 +520,31 @@ tm_fw_udp_apply_exec() {
   esac
 }
 
-tm_fw_udp_delete_exec() {
-  local name="$1"
+tm_fw_udp_apply_exec() {
+  tm_fw_l4_apply_exec udp "$@"
+}
+
+tm_fw_l4_delete_exec() {
+  local proto="$1"
+  local name="$2"
   local backend
+  tm_l4_proto_ok "$proto" || return 1
   backend=$(tm_fw_active_backend) || return 1
   case "$backend" in
-    iptables) tm_iptables_udp_delete_exec "$name" ;;
-    nft) tm_nft_udp_delete_exec "$name" ;;
+    iptables) tm_iptables_l4_delete_exec "$proto" "$name" ;;
+    nft) tm_nft_l4_delete_exec "$proto" "$name" ;;
     *) return 1 ;;
   esac
+}
+
+tm_fw_udp_delete_exec() {
+  tm_fw_l4_delete_exec udp "$1"
+}
+
+tm_fw_forward_delete_exec() {
+  local name="$1"
+  tm_fw_l4_delete_exec tcp "$name" || return 1
+  tm_fw_l4_delete_exec udp "$name" || return 1
 }
 
 tm_ip6tables_input_ensure() {

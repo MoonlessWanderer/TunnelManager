@@ -2,8 +2,8 @@
 
 Tunnel Manager is a modular Bash tool for a pair of Debian or Ubuntu servers.
 One server is the Iran role and the other is the foreign role. It builds a
-WireGuard or kernel GRE tunnel between them, forwards TCP with a dedicated
-HAProxy process, and forwards UDP with DNAT, optional SNAT, and forward rules.
+WireGuard or kernel GRE tunnel between them, and forwards TCP and UDP with
+one firewall path: DNAT, optional SNAT, and forward rules.
 
 The tool does not flush firewall tables, does not replace unrelated firewall
 rules, and does not change the default route.
@@ -13,7 +13,7 @@ rules, and does not change the default route.
 - Debian or Ubuntu
 - Bash 4.4 or newer
 - root for apply, restore, and service installation
-- Packages: `wireguard`, `iproute2`, `iptables`, `nftables`, `haproxy`,
+- Packages: `wireguard`, `iproute2`, `iptables`, `nftables`,
   `iputils-ping`, `procps`
 
 WireGuard is the recommended tunnel. GRE has no encryption and no
@@ -94,8 +94,8 @@ Run `sudo tm` to open the menu.
 
 IPv6 tunnel addresses use prefix 64-127. An IPv6 public endpoint uses
 `ip6gre` for GRE and `ip6tables` only when the iptables backend is selected.
-WireGuard `AllowedIPs` stays a single host: `/32` or `/128`. UDP port
-forwarding remains IPv4. TCP forwarding can target an IPv6 address.
+WireGuard `AllowedIPs` stays a single host: `/32` or `/128`. Port forwarding
+is IPv4 for both TCP and UDP.
 
 ## Safety
 
@@ -112,11 +112,12 @@ forwarding remains IPv4. TCP forwarding can target an IPv6 address.
 - WireGuard uses `Table = off` and a peer `/32`. `0.0.0.0/0` and `::/0` are
   rejected. Assigning a tunnel address creates a connected route for that
   prefix only. That is not a default-route change.
-- UDP forwarding may set `net.ipv4.ip_forward=1` and
+- Port forwarding may set `net.ipv4.ip_forward=1` and
   `net.ipv4.conf.<tunnel>.rp_filter=2`. A foreign sysctl drop-in is not
   overwritten. `rp_filter` is not changed for `all` or `default`.
-- TCP forwarding uses `/etc/tunnel-manager/haproxy.cfg`. The system file
-  `/etc/haproxy/haproxy.cfg` is not modified. `haproxy -c` runs before a reload.
+- TCP and UDP forwarding use the same NAT rules. The system file
+  `/etc/haproxy/haproxy.cfg` is not modified. A leftover Tunnel Manager
+  HAProxy process is stopped by `apply` and `down`.
 - Listen ports and DNAT ports that match the SSH port are refused.
 - Private keys are mode `0600`. Logs redact WireGuard key material. Backups
   omit keys unless `--include-keys` is passed, and that option prints a warning.
@@ -127,8 +128,8 @@ forwarding remains IPv4. TCP forwarding can target an IPv6 address.
 ```text
 bin/tunnel-manager          command entry point
 lib/*.sh                    libraries
-lib/haproxy-reload.sh       validates HAProxy before a graceful reload
-systemd/*.service.in        apply and dedicated HAProxy units
+lib/haproxy-reload.sh       leftover helper; forwarding does not use it
+systemd/*.service.in        apply unit and a leftover HAProxy unit
 examples/                   sample state files
 docs/                       architecture, operations, and security notes
 tests/                      unit tests and command fakes

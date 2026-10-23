@@ -62,19 +62,17 @@ tm_menu_forward() {
   local choice=""
   while true; do
     choice=$(tm_menu_choose "Port forwards" "Back" \
-      "Add TCP forward" \
-      "Add UDP forward" \
+      "Add forward" \
       "Edit a forward" \
       "Delete a forward" \
       "List forwards" \
       "Test a forward") || return 1
     case "$choice" in
-      1) tm_menu_add_forward tcp ;;
-      2) tm_menu_add_forward udp ;;
-      3) tm_menu_edit_forward ;;
-      4) tm_menu_delete_forward ;;
-      5) tm_action_forward_list; tm_menu_pause ;;
-      6) tm_menu_test_forward ;;
+      1) tm_menu_add_forward_prompt ;;
+      2) tm_menu_edit_forward ;;
+      3) tm_menu_delete_forward ;;
+      4) tm_action_forward_list; tm_menu_pause ;;
+      5) tm_menu_test_forward ;;
       0) return 0 ;;
       *) tm_warn "Unknown choice." ;;
     esac
@@ -108,6 +106,12 @@ tm_menu_ssh_port() {
     fi
   fi
   printf '%s\n' "22"
+}
+
+tm_menu_add_forward_prompt() {
+  local proto=""
+  tm_prompt proto "Protocol tcp or udp" "tcp" || return 1
+  tm_menu_add_forward "$proto"
 }
 
 tm_menu_add_forward() {

@@ -33,15 +33,12 @@ acknowledgement is stored as `TM_GRE_ACK=yes`. The tool never runs
 `apply` records whether a tunnel interface was already up. Rollback stops
 only a tunnel that this run started.
 
-## TCP
+## Port forwarding
 
-HAProxy is a separate process. Its configuration is
-`/etc/tunnel-manager/haproxy.cfg` and its pid file is
-`/run/tunnel-manager/haproxy.pid`. Rendering emits `mode tcp`, `option
-tcp-check`, and a server with an optional `source` address. The listen port
-cannot be the SSH port. `haproxy -c` must succeed before `-D` or a reload.
-If the systemd unit is not installed, HAProxy is started directly. An empty
-forward list stops the process and removes the config.
+TCP and UDP use the same firewall NAT path. Both are IPv4 only. The tunnel
+itself may still be IPv6. A saved forward sets `net.ipv4.ip_forward=1`.
+`apply` and `down` stop a leftover HAProxy process so an older install does
+not keep listening. The system HAProxy configuration is not modified.
 
 ## UDP
 
@@ -72,8 +69,7 @@ toward its public default route. No route is added when the destination is
 outside the tunnel subnet; the plan warns that the destination must already
 be reachable.
 
-`net.ipv4.ip_forward` is raised only while a saved UDP forward exists. TCP
-through HAProxy does not need it.
+`net.ipv4.ip_forward` is raised while any saved forward exists.
 
 ## Plans and rollback
 
@@ -94,9 +90,8 @@ does not appear in the plan.
 `tunnel-manager-apply.service` is a oneshot unit. Its start command is
 `tunnel-manager apply --yes` and its stop command is `tunnel-manager down
 --yes`. Saved state is the confirmation, so boot does not prompt.
-`tunnel-manager-haproxy.service` validates the dedicated config before start
-and reload. `service enable` enables the apply unit only. HAProxy is started
-by apply when TCP forwards exist.
+`service enable` enables the apply unit only. Apply stops
+`tunnel-manager-haproxy.service` when that leftover unit is installed.
 
 ## Backups
 

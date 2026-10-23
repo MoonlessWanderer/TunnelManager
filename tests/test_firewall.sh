@@ -41,6 +41,13 @@ else
   tm_pass "iptables apply does not invoke nft"
 fi
 tm_expect_ok "udp delete" tm_iptables_udp_delete_exec edge
+tm_expect_ok "iptables tcp apply" tm_iptables_l4_apply_exec tcp web eth0 443 10.200.0.2 443 10.200.0.1 no
+if grep -q -- '-p tcp --dport 443' "${TM_FAKE_ROOT}/iptables.log"; then
+  tm_pass "iptables tcp DNAT is installed"
+else
+  tm_fail "iptables tcp DNAT was not installed"
+fi
+tm_expect_ok "tcp delete" tm_iptables_l4_delete_exec tcp web
 if grep -q -- "-X TM_PREROUTING" "${TM_FAKE_ROOT}/iptables.log"; then
   tm_pass "empty chains are removed without a flush"
 else
@@ -56,6 +63,12 @@ rules_first=$(grep -c "add rule" "${TM_FAKE_ROOT}/nft.log" || true)
 tm_expect_ok "nft udp apply again" tm_fw_udp_apply_exec edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
 rules_second=$(grep -c "add rule" "${TM_FAKE_ROOT}/nft.log" || true)
 tm_expect_eq "nft rules are not duplicated" "$rules_first" "$rules_second"
+tm_expect_ok "nft tcp apply" tm_fw_l4_apply_exec tcp web eth0 443 10.200.0.2 443 10.200.0.1 yes
+if grep -q "tcp dport 443" "${TM_FAKE_ROOT}/nft.log"; then
+  tm_pass "nft tcp DNAT uses the same table"
+else
+  tm_fail "nft tcp DNAT was not installed"
+fi
 printf '%s\n' "table inet filter {" >"${TM_FAKE_ROOT}/nft.foreign"
 printf '%s\n' "  chain input { type filter hook input priority 0; policy drop; }" >>"${TM_FAKE_ROOT}/nft.foreign"
 printf '%s\n' "}" >>"${TM_FAKE_ROOT}/nft.foreign"

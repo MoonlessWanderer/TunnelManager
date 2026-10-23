@@ -81,12 +81,10 @@ tm_detect_iface_ipv4() {
   printf '%s\n' "$ip"
 }
 
-tm_any_udp_forward() {
-  local name proto
+tm_any_forward() {
+  local name
   while IFS= read -r name; do
-    [[ -n "$name" ]] || continue
-    proto=$(tm_forward_proto "$name" || true)
-    [[ "$proto" == "udp" ]] && return 0
+    [[ -n "$name" ]] && return 0
   done < <(tm_list_forwards)
   return 1
 }
@@ -99,7 +97,7 @@ tm_forward_proto() {
 }
 
 tm_sysctl_forward_needed() {
-  tm_any_udp_forward
+  tm_any_forward
 }
 
 tm_sysctl_sync_exec() {

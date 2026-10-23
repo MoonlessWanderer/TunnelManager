@@ -50,10 +50,13 @@ tm_expect_fail "SSH listen port is rejected" \
 tm_expect_ok "add tcp forward" \
   tm_action_forward_add --name web --proto tcp --listen-port 443 \
   --dest-ip 10.200.0.2 --source-ip 10.200.0.1 --ingress-iface eth0 --snat never --yes
-if grep -q "frontend tm_web_fe" "$TM_HAPROXY_CFG"; then
-  tm_pass "tcp forward rendered a haproxy frontend"
+if grep -q -- '-p tcp --dport 443' "${TM_FAKE_ROOT}/iptables.log" \
+  && grep -q -- 'tm:tcp:web:dnat' "${TM_FAKE_ROOT}/iptables.log" \
+  && grep -q -- 'DNAT' "${TM_FAKE_ROOT}/iptables.log" \
+  && [[ ! -f "$TM_HAPROXY_CFG" ]]; then
+  tm_pass "tcp forward installed DNAT and did not start HAProxy"
 else
-  tm_fail "tcp forward did not render haproxy"
+  tm_fail "tcp forward did not use firewall NAT"
 fi
 
 tm_expect_ok "add udp forward" \
@@ -132,6 +135,9 @@ fi
 tm_expect_fail "udp ipv6 forward is rejected" \
   tm_action_forward_add --name v6dns --proto udp --listen-port 5301 \
   --dest-ip 2001:db8:1::2 --source-ip 2001:db8:1::1 --ingress-iface eth0 --yes
+tm_expect_fail "tcp ipv6 forward is rejected" \
+  tm_action_forward_add --name v6web --proto tcp --listen-port 4430 \
+  --dest-ip 2001:db8:1::2 --source-ip 2001:db8:1::1 --ingress-iface eth0 --yes
 text6=$(TM_DRY_RUN=1 tm_action_tunnel_create --name gre6 --type gre \
   --local-public-ip 2001:db8::11 --remote-public-ip 2001:db8::21 \
   --local-tunnel-ip 2001:db8:3::1 --remote-tunnel-ip 2001:db8:3::2 \
@@ -142,11 +148,6 @@ else
   tm_fail "ipv6 GRE dry-run was incomplete"
 fi
 
-printf '%s\n' "frontend tm_boom_fe" >"${TM_FAKE_ROOT}/haproxy.reject-if"
-status=0
-tm_action_forward_add --name boom --proto tcp --listen-port 8443 \
-  --dest-ip 10.200.0.2 --source-ip 10.200.0.1 --ingress-iface eth0 --snat never --yes || status=$?
-rm -f -- "${TM_FAKE_ROOT}/haproxy.reject-if"
 shown=$(tm_action_tunnel_create --name pair --type wireguard \
   --local-public-ip 203.0.113.30 --remote-public-ip 203.0.113.40 \
   --local-tunnel-ip 10.200.1.1 --remote-tunnel-ip 10.200.1.2 \
@@ -174,21 +175,12 @@ else
 fi
 tm_expect_ok "tcp forward takes addresses from the tunnel" \
   tm_action_forward_add --name auto --proto tcp --listen-port 9443 --tunnel edge --yes
-if grep -q "frontend tm_auto_fe" "$TM_HAPROXY_CFG" \
-  && grep -q "bind 0.0.0.0:9443" "$TM_HAPROXY_CFG" \
-  && grep -q "server dest 10.200.0.2:9443 source 10.200.0.1" "$TM_HAPROXY_CFG"; then
-  tm_pass "tunnel forward filled destination, source, and listen address"
+if grep -q -- '-i eth0 -p tcp --dport 9443' "${TM_FAKE_ROOT}/iptables.log" \
+  && grep -q -- '--to-destination 10.200.0.2:9443' "${TM_FAKE_ROOT}/iptables.log" \
+  && grep -q -- '--to-source 10.200.0.1' "${TM_FAKE_ROOT}/iptables.log"; then
+  tm_pass "tunnel forward filled destination, source, and ingress"
 else
   tm_fail "tunnel forward did not use the saved tunnel"
-fi
-
-tm_expect_eq "rejected haproxy forward rolls back" "$status" "4"
-if [[ ! -f "${TM_ETC}/forwards/boom.conf" && ! -f "$(tm_journal_path)" ]] \
-  && grep -q "frontend tm_web_fe" "$TM_HAPROXY_CFG" \
-  && ! grep -q "frontend tm_boom_fe" "$TM_HAPROXY_CFG"; then
-  tm_pass "failed tcp forward left the previous HAProxy config in place"
-else
-  tm_fail "failed tcp forward did not restore HAProxy state"
 fi
 
 printf 'net.ipv4.ip_forward = 1\n' >"$TM_BBR_FILE"

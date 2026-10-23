@@ -194,7 +194,7 @@ tm_iptables_rule_is_safe() {
   case "$target" in
     DNAT)
       [[ "$chain" == "TM_PREROUTING" ]] || return 1
-      [[ "$proto" == "udp" ]] || return 1
+      [[ "$proto" == "udp" || "$proto" == "tcp" ]] || return 1
       [[ -n "$in_iface" && -n "$dport" && -n "$to_dest" ]] || return 1
       [[ "$to_dest" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]] || return 1
       tm_ipv4_is_unicast_host "${to_dest%%:*}" || return 1
@@ -203,14 +203,14 @@ tm_iptables_rule_is_safe() {
       ;;
     SNAT)
       [[ "$chain" == "TM_POSTROUTING" ]] || return 1
-      [[ "$proto" == "udp" ]] || return 1
+      [[ "$proto" == "udp" || "$proto" == "tcp" ]] || return 1
       [[ -n "$daddr" && -n "$dport" && -n "$to_src" ]] || return 1
       tm_ipv4_is_unicast_host "$to_src" || return 1
       ;;
     ACCEPT)
       [[ "$chain" == "TM_FORWARD" || "$chain" == "TM_INPUT" ]] || return 1
       case "$proto" in
-        udp)
+        udp|tcp)
           [[ -n "$dport" || -n "$sport" ]] || return 1
           case "$ctstate" in
             NEW,ESTABLISHED|ESTABLISHED,RELATED) ;;
@@ -406,7 +406,7 @@ tm_nft_rule_tail_is_safe() {
         tm_valid_iface "${args[$i]:-}" || return 1
         iif_seen=1
         ;;
-      udp)
+      udp|tcp)
         proto_seen=1
         ;;
       gre)

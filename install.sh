@@ -122,7 +122,6 @@ if [[ "$SKIP_PACKAGES" -eq 0 ]]; then
     iproute2 \
     iptables \
     nftables \
-    haproxy \
     iputils-ping \
     procps \
     ca-certificates

@@ -17,6 +17,7 @@ administer, and review every plan before confirming it.
 - Write outside its state, log, run, sysctl, and `tm-*.conf` paths.
 - Mix iptables and nftables in one apply. `ip6tables` is used only as the
   IPv6 companion of the iptables backend, for an IPv6 tunnel endpoint.
+- Forward TCP or UDP through a second proxy. Both protocols use firewall NAT.
 - Reload HAProxy without a successful `haproxy -c`.
 - Start GRE without an explicit no-encryption acknowledgement.
 - Change the default route while enabling BBR. BBR may set only

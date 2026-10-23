@@ -16,14 +16,14 @@ tm_usage() {
   cat <<EOF
 Tunnel Manager ${TM_VERSION}
 Manage a WireGuard or GRE tunnel and TCP/UDP forwards between two servers.
-Tunnel addresses and endpoints may be IPv4 or IPv6. UDP forwarding is IPv4 only.
+Tunnel addresses and endpoints may be IPv4 or IPv6. Port forwarding is IPv4 only.
 
 Safety:
   The default route is never changed.
   Firewall tables are never flushed.
   Existing firewall rules are preserved; only TM_* chains and the
   inet/tunnel_manager table are modified.
-  HAProxy is a separate process and is validated before reload.
+  TCP and UDP forwards use one firewall NAT path.
   SSH listen ports are refused as forward listen ports.
 
 Usage:
