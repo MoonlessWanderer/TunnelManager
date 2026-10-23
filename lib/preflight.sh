@@ -88,6 +88,19 @@ tm_iptables_target_ok() {
   esac
 }
 
+tm_iptables_ctstate_ok() {
+  # iptables-nft prints the same states in either order.
+  case "$1" in
+    NEW,ESTABLISHED|ESTABLISHED,NEW|\
+      ESTABLISHED,RELATED|RELATED,ESTABLISHED)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 tm_iptables_rule_is_safe() {
   local chain="$1"
   shift
@@ -219,10 +232,7 @@ tm_iptables_rule_is_safe() {
       case "$proto" in
         udp|tcp)
           [[ -n "$dport" || -n "$sport" ]] || return 1
-          case "$ctstate" in
-            NEW,ESTABLISHED|ESTABLISHED,RELATED) ;;
-            *) return 1 ;;
-          esac
+          tm_iptables_ctstate_ok "$ctstate" || return 1
           ;;
         gre|47)
           [[ "$chain" == "TM_INPUT" ]] || return 1

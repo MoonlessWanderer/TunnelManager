@@ -302,6 +302,14 @@ tm_iptables_delete_parsed() {
   return 0
 }
 
+tm_iptables_line_has_comment() {
+  local line="$1"
+  local comment="$2"
+  [[ "$comment" =~ ^tm:[a-z0-9:_-]{1,80}$ ]] || return 1
+  # The comment must end here, so tm:tcp:p1:fwd does not match tm:tcp:p1:fwdret.
+  [[ "$line" =~ --comment[[:space:]]+\"?${comment}([^a-z0-9_:-]|$) ]]
+}
+
 tm_iptables_delete_comment() {
   local table="$1"
   local chain="$2"
@@ -310,7 +318,7 @@ tm_iptables_delete_comment() {
   local -a spec=()
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
-    [[ "$line" == *"--comment ${comment}"* || "$line" == *"--comment \"${comment}\""* ]] || continue
+    tm_iptables_line_has_comment "$line" "$comment" || continue
     [[ "$line" == "-A ${chain} "* ]] || continue
     prefix="-A ${chain} "
     tm_iptables_split_spec "${line#"${prefix}"}" spec
@@ -642,7 +650,7 @@ tm_ip6tables_input_delete_comment() {
   local -a spec=()
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
-    [[ "$line" == *"--comment ${comment}"* || "$line" == *"--comment \"${comment}\""* ]] || continue
+    tm_iptables_line_has_comment "$line" "$comment" || continue
     [[ "$line" == "-A TM_INPUT "* ]] || continue
     prefix="-A TM_INPUT "
     tm_iptables_split_spec "${line#"${prefix}"}" spec

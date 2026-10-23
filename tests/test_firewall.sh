@@ -88,6 +88,22 @@ tm_expect_ok "saved snat with /32 can be deleted" \
   tm_iptables_delete_comment nat TM_POSTROUTING tm:tcp:p443:snat
 tm_expect_ok "saved forward return with /32 can be deleted" \
   tm_iptables_delete_comment filter TM_FORWARD tm:tcp:p443:fwdret
+reply='-A TM_FORWARD -s 203.0.113.31/32 -p tcp -m tcp --sport 4444 -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment "tm:tcp:p4444:fwdret" -j ACCEPT'
+if tm_iptables_line_has_comment "$reply" "tm:tcp:p4444:fwd"; then
+  tm_fail "comment fwd matched fwdret"
+else
+  tm_pass "comment fwd does not match fwdret"
+fi
+if tm_iptables_line_has_comment "$reply" "tm:tcp:p4444:fwdret"; then
+  tm_pass "comment fwdret matches exactly"
+else
+  tm_fail "comment fwdret was not recognized"
+fi
+printf 'RULE\tfilter\tTM_FORWARD\t%s\n' \
+  '-s 203.0.113.31/32 -p tcp -m tcp --sport 4444 -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment "tm:tcp:p4444:fwdret" -j ACCEPT' \
+  >>"${TM_FAKE_ROOT}/iptables.state"
+tm_expect_ok "saved return rule with RELATED,ESTABLISHED can be deleted" \
+  tm_iptables_delete_comment filter TM_FORWARD tm:tcp:p4444:fwdret
 if grep -q '203.0.113.31/32' "${TM_FAKE_ROOT}/iptables.state"; then
   tm_fail "host /32 rules were not removed"
 else
