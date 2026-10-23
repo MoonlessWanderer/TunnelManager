@@ -6,7 +6,7 @@ tm_test_reset
 
 bin="${TM_REPO}/bin/tunnel-manager"
 version=$(bash "$bin" version)
-tm_expect_eq "version" "$version" "1.5.0"
+tm_expect_eq "version" "$version" "1.6.0"
 bash "$bin" help >/dev/null
 tm_pass "help exits successfully"
 
@@ -18,7 +18,6 @@ child_env=(
   "TM_VAR=${TM_VAR}"
   "TM_LOG_DIR=${TM_LOG_DIR}"
   "TM_RUN=${TM_RUN}"
-  "TM_WG_DIR=${TM_WG_DIR}"
   "TM_SYSCTL_FILE=${TM_SYSCTL_FILE}"
   "TM_FAKE_ROOT=${TM_FAKE_ROOT}"
 )

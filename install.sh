@@ -133,7 +133,6 @@ local_sh=""
 for local_sh in "${ROOT}/lib/"*.sh; do
   install -m 0644 "$local_sh" "${LIB_DEST}/$(basename "$local_sh")"
 done
-install -m 0755 "${ROOT}/lib/haproxy-reload.sh" "${LIB_DEST}/haproxy-reload.sh"
 install -m 0755 "${ROOT}/uninstall.sh" "${LIB_DEST}/uninstall.sh"
 if [[ -d "${ROOT}/examples" ]]; then
   for local_sh in "${ROOT}/examples/"*; do
@@ -147,26 +146,18 @@ if [[ -d "${ROOT}/docs" ]]; then
     install -m 0644 "$local_sh" "${SHARE_DEST}/docs/$(basename "$local_sh")"
   done
 fi
-for local_sh in "${UNIT_SRC}/"*.in; do
-  [[ -f "$local_sh" ]] || continue
+local_sh="${UNIT_SRC}/tunnel-manager-apply.service.in"
+if [[ -f "$local_sh" ]]; then
   install -m 0644 "$local_sh" "${SHARE_DEST}/systemd/$(basename "$local_sh")"
-done
+fi
 
-if [[ "$SKIP_SYSTEMD" -eq 0 && -d /etc/systemd/system ]]; then
-  haproxy_bin=$(command -v haproxy || true)
-  [[ -n "$haproxy_bin" ]] || haproxy_bin="/usr/sbin/haproxy"
-  for local_sh in "${UNIT_SRC}/"*.in; do
-    [[ -f "$local_sh" ]] || continue
-    dest="/etc/systemd/system/$(basename "${local_sh%.in}")"
-    sed \
-      -e "s|@BIN@|${BIN_DEST}/tunnel-manager|g" \
-      -e "s|@LIB@|${LIB_DEST}|g" \
-      -e "s|@HAPROXY@|${haproxy_bin}|g" \
-      -e "s|@CFG@|/etc/tunnel-manager/haproxy.cfg|g" \
-      -e "s|@PID@|/run/tunnel-manager/haproxy.pid|g" \
-      "$local_sh" >"$dest"
-    chmod 0644 "$dest"
-  done
+if [[ "$SKIP_SYSTEMD" -eq 0 && -d /etc/systemd/system && -f "$local_sh" ]]; then
+  dest="/etc/systemd/system/$(basename "${local_sh%.in}")"
+  sed \
+    -e "s|@BIN@|${BIN_DEST}/tunnel-manager|g" \
+    -e "s|@LIB@|${LIB_DEST}|g" \
+    "$local_sh" >"$dest"
+  chmod 0644 "$dest"
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
   fi

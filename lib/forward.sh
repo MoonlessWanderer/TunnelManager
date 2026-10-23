@@ -279,6 +279,20 @@ tm_forward_delete_undo() {
   tm_sysctl_sync_exec || return 1
 }
 
+tm_forward_orphan_lines() {
+  local name ref
+  local -A row=()
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    tm_forward_load "$name" row || continue
+    ref="${row[TM_TUNNEL_REF]:-none}"
+    if [[ -n "$ref" && "$ref" != "none" && ! -f "$(tm_tunnel_file "$ref")" ]]; then
+      printf '%s %s %s %s\n' "$name" "${row[TM_FORWARD_PROTO]:-tcp}" \
+        "${row[TM_LISTEN_PORT]:-}" "$ref"
+    fi
+  done < <(tm_list_forwards)
+}
+
 tm_action_forward_delete() {
   local -A opt=()
   local name proto

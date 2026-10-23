@@ -8,7 +8,7 @@ tm_ensure_tree
 printf '%s\n' "$TM_TEST_PRIV" | tm_write_file "$(tm_key_file edge)" 0600
 tm_kv_write "$(tm_tunnel_file edge)" 0600 \
   TM_TUNNEL_NAME edge \
-  TM_TUNNEL_TYPE wireguard \
+  TM_TUNNEL_TYPE gre \
   TM_TUNNEL_STATE active \
   TM_LOCAL_PUBLIC_IP 203.0.113.10 \
   TM_REMOTE_PUBLIC_IP 203.0.113.20 \
@@ -17,7 +17,7 @@ tm_kv_write "$(tm_tunnel_file edge)" 0600 \
   TM_TUNNEL_CIDR 30 \
   TM_MTU 1420 \
   TM_WAN_IFACE eth0 \
-  TM_GRE_ACK no \
+  TM_GRE_ACK yes \
   TM_PRIVATE_KEY_FILE "$(tm_key_file edge)" \
   TM_LISTEN_PORT 51820 \
   TM_ENDPOINT_PORT 51820 \

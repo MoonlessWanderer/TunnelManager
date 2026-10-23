@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Remove Tunnel Manager. This script does not flush firewall rules
-# and does not remove wireguard or haproxy.
+# Remove Tunnel Manager. This script does not flush firewall rules.
 set -euo pipefail
 
 PREFIX="/usr/local"
@@ -13,7 +12,6 @@ ETC_DIR=/etc/tunnel-manager
 VAR_DIR=/var/lib/tunnel-manager
 LOG_DIR=/var/log/tunnel-manager
 RUN_DIR=/run/tunnel-manager
-WG_DIR=/etc/wireguard
 SYSCTL_FWD=/etc/sysctl.d/99-tunnel-manager.conf
 SYSCTL_BBR=/etc/sysctl.d/98-tunnel-manager-bbr.conf
 
@@ -22,9 +20,8 @@ usage() {
 Usage: uninstall.sh [--prefix DIR] [--yes] [--purge-state] [--skip-down]
 
 Stops Tunnel Manager, then removes the program. --purge-state also removes
-saved tunnels, keys, logs, Tunnel Manager sysctl files, and
-/etc/wireguard/tm-*.conf. Missing paths are ignored. Foreign firewall rules
-and other WireGuard configs are left in place.
+saved tunnels, forwards, logs, and Tunnel Manager sysctl files. Missing
+paths are ignored. Firewall rules owned by other tools are left in place.
 EOF
 }
 
@@ -47,7 +44,6 @@ if [[ "${TM_TEST_MODE:-0}" == "1" ]]; then
   VAR_DIR=${TM_VAR:-$VAR_DIR}
   LOG_DIR=${TM_LOG_DIR:-$LOG_DIR}
   RUN_DIR=${TM_RUN:-$RUN_DIR}
-  WG_DIR=${TM_WG_DIR:-$WG_DIR}
   SYSCTL_FWD=${TM_SYSCTL_FILE:-$SYSCTL_FWD}
   SYSCTL_BBR=${TM_BBR_FILE:-$SYSCTL_BBR}
 fi
@@ -91,8 +87,7 @@ fi
 
 if [[ "${TM_TEST_MODE:-0}" != "1" ]] && command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
   systemctl disable --now tunnel-manager-apply.service >/dev/null 2>&1 || true
-  systemctl disable --now tunnel-manager-haproxy.service >/dev/null 2>&1 || true
-  rm -f -- /etc/systemd/system/tunnel-manager-apply.service /etc/systemd/system/tunnel-manager-haproxy.service
+  rm -f -- /etc/systemd/system/tunnel-manager-apply.service
   systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 
@@ -116,23 +111,6 @@ if [[ "$PURGE_STATE" -eq 1 ]]; then
         sysctl -w net.ipv4.ip_forward=0 >/dev/null 2>&1 || true
       fi
     fi
-  fi
-
-  if [[ "$WG_DIR" == /etc/wireguard || ( "${TM_TEST_MODE:-0}" == "1" && -n "${TM_TEST_ROOT:-}" && "$WG_DIR" == "${TM_TEST_ROOT}"/* ) ]]; then
-    if [[ -d "$WG_DIR" ]]; then
-      shopt -s nullglob
-      for conf in "$WG_DIR"/tm-*.conf; do
-        name=$(basename -- "$conf" .conf)
-        if [[ "${TM_TEST_MODE:-0}" != "1" ]] && command -v wg-quick >/dev/null 2>&1; then
-          wg-quick down "$name" >/dev/null 2>&1 || true
-        fi
-        rm -f -- "$conf"
-      done
-      shopt -u nullglob
-    fi
-  else
-    printf '%s\n' "Refusing to remove WireGuard configs in ${WG_DIR}." >&2
-    exit 1
   fi
 
   for dir in "$ETC_DIR" "$VAR_DIR" "$LOG_DIR" "$RUN_DIR"; do
@@ -160,7 +138,7 @@ if [[ "$PURGE_STATE" -eq 1 ]]; then
         ;;
     esac
   done
-  printf '%s\n' "Saved tunnels, keys, logs, and Tunnel Manager WireGuard configs were removed."
+  printf '%s\n' "Saved tunnels, forwards, and logs were removed."
 fi
 
 rm -f -- "${PREFIX}/bin/tunnel-manager" "${PREFIX}/bin/tm"

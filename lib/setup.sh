@@ -57,12 +57,32 @@ tm_setup_forward_name() {
   printf '%s\n' "$candidate"
 }
 
+tm_setup_spec_has_listen() {
+  local spec="$1"
+  local listen="$2"
+  local item got
+  local -a items=()
+  [[ -n "$spec" ]] || return 1
+  IFS=',' read -r -a items <<<"$spec"
+  for item in "${items[@]}"; do
+    if [[ "$item" == *=* ]]; then
+      got="${item%%=*}"
+    else
+      got="$item"
+    fi
+    if [[ "$got" == "$listen" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 tm_setup_split_ports() {
   local spec="$1"
   local -n _tm_listen=$2
   local -n _tm_dest=$3
   local -a items=()
-  local item listen dest
+  local item listen dest seen=""
   _tm_listen=()
   _tm_dest=()
   [[ -n "$spec" ]] || return 0
@@ -87,6 +107,15 @@ tm_setup_split_ports() {
     if tm_port_is_protected "$listen"; then
       tm_error "Refusing to listen on protected port ${listen}."
       return 1
+    fi
+    if tm_setup_spec_has_listen "$seen" "$listen"; then
+      tm_error "Listen port ${listen} is listed more than once."
+      return 1
+    fi
+    if [[ -n "$seen" ]]; then
+      seen="${seen},${listen}"
+    else
+      seen="$listen"
     fi
     _tm_listen+=("$listen")
     _tm_dest+=("$dest")
@@ -187,12 +216,25 @@ tm_setup_forwards_for() {
   local -A row=()
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
-    tm_kv_read "$(tm_forward_file "$name")" row || continue
+    tm_forward_load "$name" row || continue
     if [[ "${row[TM_TUNNEL_REF]:-}" == "$tunnel" ]]; then
       printf '%s %s %s %s\n' "$name" "${row[TM_FORWARD_PROTO]:-tcp}" \
         "${row[TM_LISTEN_PORT]:-}" "${row[TM_DEST_PORT]:-}"
     fi
   done < <(tm_list_forwards)
+}
+
+tm_setup_abort_new_tunnel() {
+  local name="$1"
+  if [[ "${TM_DRY_RUN:-0}" == "1" || ! -f "$(tm_tunnel_file "$name")" ]]; then
+    return 0
+  fi
+  tm_error "Setup failed. Removing unfinished tunnel ${name}."
+  if ! (
+    tm_action_tunnel_delete --name "$name" --yes
+  ); then
+    tm_error "Tunnel ${name} is still saved."
+  fi
 }
 
 tm_setup_add_ports() {
@@ -204,6 +246,7 @@ tm_setup_add_ports() {
     tm_error "Tunnel ${name} was not found."
     return 1
   }
+  tm_setup_reject_taken_ports "$ports" || return 1
   tm_setup_split_ports "$ports" listen_ports dest_ports || return 1
   if [[ "${#listen_ports[@]}" -eq 0 ]]; then
     tm_error "Enter at least one TCP port."
@@ -214,6 +257,19 @@ tm_setup_add_ports() {
     tm_action_forward_add --name "$fname" --proto tcp \
       --listen-port "${listen_ports[$i]}" --dest-port "${dest_ports[$i]}" \
       --tunnel "$name" --snat auto --yes || return 1
+  done
+}
+
+tm_setup_reject_taken_ports() {
+  local ports="$1"
+  local -a listen_ports=() dest_ports=()
+  local i
+  tm_setup_split_ports "$ports" listen_ports dest_ports || return 1
+  for i in "${!listen_ports[@]}"; do
+    if tm_forward_listen_conflict "_" "tcp" "0.0.0.0" "${listen_ports[$i]}"; then
+      tm_error "A tcp forward already listens on 0.0.0.0:${listen_ports[$i]}."
+      return 1
+    fi
   done
 }
 
@@ -232,6 +288,7 @@ tm_setup_apply_iran() {
   local -a create_args=()
   local allow i fname
   allow="${TM_ALLOW_GRE:-0}"
+  tm_setup_reject_taken_ports "$ports" || return 1
   tm_setup_split_ports "$ports" listen_ports dest_ports || return 1
   if [[ "$type" == "forward" && "${#listen_ports[@]}" -eq 0 ]]; then
     tm_error "A plain port forward needs at least one TCP port."
@@ -253,10 +310,18 @@ tm_setup_apply_iran() {
   fi
   tm_action_tunnel_create "${create_args[@]}" || return 1
   for i in "${!listen_ports[@]}"; do
-    fname=$(tm_setup_forward_name "${listen_ports[$i]}" "${dest_ports[$i]}") || return 1
-    tm_action_forward_add --name "$fname" --proto tcp \
-      --listen-port "${listen_ports[$i]}" --dest-port "${dest_ports[$i]}" \
-      --tunnel "$name" --snat auto --yes || return 1
+    fname=$(tm_setup_forward_name "${listen_ports[$i]}" "${dest_ports[$i]}") || {
+      tm_setup_abort_new_tunnel "$name"
+      return 1
+    }
+    if ! (
+      tm_action_forward_add --name "$fname" --proto tcp \
+        --listen-port "${listen_ports[$i]}" --dest-port "${dest_ports[$i]}" \
+        --tunnel "$name" --snat auto --yes
+    ); then
+      tm_setup_abort_new_tunnel "$name"
+      return 1
+    fi
   done
   if [[ "${TM_DRY_RUN:-0}" != "1" ]]; then
     tm_setup_print_foreign "$type" "$name" "$local_pub" "$remote_pub" \

@@ -30,9 +30,6 @@ tm_apply_build_plan() {
   tm_plan_add "Synchronize IPv4 forwarding with saved forwards" \
     "$(tm_shell_quote tm_sysctl_sync_exec)" \
     tm_sysctl_sync_exec
-  tm_plan_add "Stop a leftover HAProxy forwarder" \
-    "$(tm_shell_quote tm_noop)" \
-    tm_haproxy_stop_exec
 }
 
 tm_action_apply() {
@@ -48,9 +45,6 @@ tm_action_apply() {
 tm_down_build_plan() {
   local name
   tm_plan_reset
-  tm_plan_add "Stop a leftover HAProxy forwarder" \
-    "$(tm_shell_quote tm_noop)" \
-    tm_haproxy_stop_exec
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
     tm_plan_add "Remove runtime rules for forward ${name}" \

@@ -96,17 +96,15 @@ tm_action_doctor() {
   else
     tm_doctor_pass "No interrupted rollback journal."
   fi
-  if [[ -f "$TM_HAPROXY_CFG" ]]; then
-    tm_doctor_warn "An old HAProxy configuration is present. Port forwarding uses the firewall."
-  else
-    tm_doctor_pass "Port forwarding uses firewall NAT."
-  fi
+  tm_doctor_pass "Port forwarding uses firewall NAT."
   local name
   local -A row=()
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
     if tm_tunnel_load "$name" row; then
-      if tm_iface_exists "$(tm_tunnel_iface "$name")"; then
+      if [[ "${row[TM_TUNNEL_TYPE]:-}" == "forward" ]]; then
+        tm_doctor_pass "Port forward ${name} has no tunnel interface."
+      elif tm_iface_exists "$(tm_tunnel_iface "$name")"; then
         tm_doctor_pass "Tunnel ${name} interface is present."
       else
         tm_doctor_warn "Tunnel ${name} is saved but its interface is down."

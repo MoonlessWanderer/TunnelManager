@@ -50,8 +50,8 @@ tm_eval_argv "$encoded" argv
 tm_expect_eq "quoted payload stays literal" "${argv[1]}" '$(touch pwned)'
 
 tm_expect_fail "/etc/passwd is not mutable" tm_path_is_mutable /etc/passwd
-tm_expect_ok "managed wireguard config is mutable" tm_path_is_mutable "${TM_WG_DIR}/tm-edge.conf"
-tm_expect_fail "foreign wireguard config is not mutable" tm_path_is_mutable "${TM_WG_DIR}/wg0.conf"
+tm_expect_fail "wireguard config is not tunnel manager state" tm_path_is_mutable "${TM_TEST_ROOT}/wireguard/tm-edge.conf"
+tm_expect_fail "foreign wireguard config is not mutable" tm_path_is_mutable "${TM_TEST_ROOT}/wireguard/wg0.conf"
 
 mkdir -p -- "$TM_ETC/real"
 rm -rf -- "$TM_ETC/alias"

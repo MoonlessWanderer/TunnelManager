@@ -49,8 +49,8 @@ tm_expect_ok "add tcp forward" \
 if grep -q -- '-p tcp --dport 443' "${TM_FAKE_ROOT}/iptables.log" \
   && grep -q -- 'tm:tcp:web:dnat' "${TM_FAKE_ROOT}/iptables.log" \
   && grep -q -- 'DNAT' "${TM_FAKE_ROOT}/iptables.log" \
-  && [[ ! -f "$TM_HAPROXY_CFG" ]]; then
-  tm_pass "tcp forward installed DNAT and did not start HAProxy"
+  && [[ ! -f "${TM_ETC}/haproxy.cfg" ]]; then
+  tm_pass "tcp forward installed DNAT through the firewall"
 else
   tm_fail "tcp forward did not use firewall NAT"
 fi
@@ -124,8 +124,8 @@ else
   tm_fail "ipv6 GRE dry-run was incomplete"
 fi
 
-tm_expect_fail "removed peer command is rejected" \
-  tm_action_tunnel_set_peer --name edge --peer-public-key "$TM_TEST_PUB" --yes
+tm_expect_fail "unknown tunnel command is rejected" \
+  tm_dispatch_tunnel set-peer --name edge --peer-public-key "$TM_TEST_PUB" --yes
 tm_expect_ok "tcp forward takes addresses from the tunnel" \
   tm_action_forward_add --name auto --proto tcp --listen-port 9443 --tunnel edge --yes
 if grep -q -- '-i eth0 -p tcp --dport 9443' "${TM_FAKE_ROOT}/iptables.log" \
@@ -174,5 +174,34 @@ else
   tm_fail "plain forward quick did not explain itself: ${forward_text}"
 fi
 tm_expect_fail "bad setup command is rejected" tm_action_quick --token 'not-a-setup'
+
+dup_listen=()
+dup_dest=()
+tm_expect_fail "repeated listen port is rejected" tm_setup_split_ports "443,443,443" dup_listen dup_dest
+tm_expect_ok "mapped port stays one listen port" tm_setup_split_ports "443=2053" dup_listen dup_dest
+tm_expect_eq "mapped listen port" "${dup_listen[0]}" "443"
+tm_expect_eq "mapped dest port" "${dup_dest[0]}" "2053"
+
+tm_expect_ok "attach port 8443 to edge" \
+  tm_action_forward_add --name owned --proto tcp --listen-port 8443 --tunnel edge --yes
+tm_expect_fail "setup refuses a listen port that is already forwarded" \
+  tm_setup_apply_iran clash gre 203.0.113.10 203.0.113.20 10.200.0.1 10.200.0.2 30 eth0 22 8443
+if [[ ! -f "$(tm_tunnel_file clash)" ]]; then
+  tm_pass "a taken port does not create the new tunnel"
+else
+  tm_fail "setup created tunnel clash even though port 8443 was taken"
+fi
+tm_expect_ok "delete tunnel removes its port forward" tm_action_tunnel_delete --name edge --yes
+if [[ ! -f "$(tm_tunnel_file edge)" && ! -f "$(tm_forward_file owned)" ]]; then
+  tm_pass "tunnel delete removed edge and forward owned"
+else
+  tm_fail "tunnel delete left edge or forward owned"
+fi
+if grep -q -- '-D TM_PREROUTING' "${TM_FAKE_ROOT}/iptables.log" \
+  && grep -q -- 'tm:tcp:owned:dnat' "${TM_FAKE_ROOT}/iptables.log"; then
+  tm_pass "tunnel delete removed the owned port rules"
+else
+  tm_fail "tunnel delete did not remove the owned port rules"
+fi
 
 tm_finish

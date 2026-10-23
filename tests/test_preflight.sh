@@ -30,7 +30,6 @@ safe=(
   "sysctl -n net.ipv4.ip_forward"
   "sysctl -w net.ipv4.ip_forward=1"
   "sysctl -w net.ipv4.conf.tm-edge.rp_filter=2"
-  "systemctl enable --now wg-quick@tm-edge"
   "systemctl daemon-reload"
   "modprobe ip_gre"
   "modprobe ip6_gre"
@@ -42,11 +41,6 @@ safe=(
   "ip addr add 2001:db8:1::1/64 dev tm-edge"
   "ip6tables -t filter -A TM_INPUT -i eth0 -p udp --dport 51820 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment tm:wg:edge:input -j ACCEPT"
   "ping -6 -c 3 -W 2 2001:db8:1::2"
-  "wg genkey"
-  "wg show tm-edge"
-  "wg-quick up tm-edge"
-  "wg-quick down tm-edge"
-  "haproxy -c -f ${TM_HAPROXY_CFG}"
 )
 
 unsafe=(
@@ -83,7 +77,13 @@ unsafe=(
   "systemctl stop ssh"
   "systemctl stop sshd"
   "systemctl stop networking"
+  "systemctl enable --now wg-quick@tm-edge"
+  "wg genkey"
+  "wg show tm-edge"
+  "wg-quick up tm-edge"
+  "wg-quick down tm-edge"
   "wg-quick up wg0"
+  "haproxy -c -f /etc/tunnel-manager/haproxy.cfg"
   "wg set tm-edge peer abc allowed-ips 0.0.0.0/0"
   "modprobe -r ip_gre"
   "haproxy -c -f /etc/haproxy/haproxy.cfg"

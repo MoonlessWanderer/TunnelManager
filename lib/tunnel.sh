@@ -173,10 +173,6 @@ tm_tunnel_start_exec() {
   if [[ "${row[TM_TUNNEL_TYPE]}" == "forward" ]]; then
     return 0
   fi
-  if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" || "${row[TM_TUNNEL_STATE]}" == "pending-peer" ]]; then
-    tm_error "WireGuard has been removed. Delete tunnel ${name} and create a GRE tunnel or a port forward."
-    return 1
-  fi
   if [[ "${row[TM_TUNNEL_TYPE]}" != "gre" ]]; then
     tm_error "Tunnel ${name} has unsupported type ${row[TM_TUNNEL_TYPE]}."
     return 1
@@ -204,8 +200,7 @@ tm_tunnel_stop_exec() {
   if [[ "${row[TM_TUNNEL_TYPE]}" == "forward" ]]; then
     return 0
   fi
-  if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]]; then
-    tm_fw_input_delete_exec wg "$name" "$family" || return 1
+  if [[ "${row[TM_TUNNEL_TYPE]}" != "gre" ]]; then
     if tm_iface_exists "$iface"; then
       tm_must ip link del dev "$iface" || return 1
     fi
@@ -236,9 +231,6 @@ tm_action_tunnel_create() {
   local gre_ack="no" link_kind status=0
   tm_opts_parse opt "$@"
   tm_opts_bind_flags opt
-  if [[ -n "${opt[peer_public_key]:-}" || -n "${opt[peer_file]:-}" ]]; then
-    tm_die "WireGuard has been removed. Peer keys are not used."
-  fi
   req[name]=$(tm_opt_get opt name)
   req[type]=$(tm_opt_get opt type)
   req[local_public_ip]=$(tm_opt_get opt local_public_ip)
@@ -291,34 +283,6 @@ tm_action_tunnel_create() {
   return "$status"
 }
 
-tm_peer_import_candidate() {
-  local path="${1:-}"
-  if [[ -n "$path" && -f "$path" ]]; then
-    printf '%s\n' "$path"
-  fi
-}
-
-tm_tunnel_apply_peer_file() {
-  local -n _tm_req=$1
-  local path="$2"
-  local -A peer=()
-  [[ -n "$path" && -f "$path" ]] || return 0
-  tm_kv_read "$path" peer || tm_die "Peer file is invalid: ${path}"
-  [[ -n "${peer[TM_PEER_PUBLIC_IP]:-}" ]] && _tm_req[remote_public_ip]="${peer[TM_PEER_PUBLIC_IP]}"
-  [[ -n "${peer[TM_PEER_TUNNEL_IP]:-}" ]] && _tm_req[remote_tunnel_ip]="${peer[TM_PEER_TUNNEL_IP]}"
-  [[ -n "${peer[TM_PEER_LISTEN_PORT]:-}" ]] && _tm_req[endpoint_port]="${peer[TM_PEER_LISTEN_PORT]}"
-  [[ -n "${peer[TM_PEER_PUBLIC_KEY]:-}" ]] && _tm_req[peer_public_key]="${peer[TM_PEER_PUBLIC_KEY]}"
-  [[ -n "${peer[TM_PEER_CIDR]:-}" ]] && _tm_req[cidr]="${peer[TM_PEER_CIDR]}"
-}
-
-tm_action_tunnel_set_peer() {
-  tm_die "WireGuard has been removed. Peer keys are not used."
-}
-
-tm_action_tunnel_keygen() {
-  tm_die "WireGuard has been removed. Tunnel Manager no longer generates keys."
-}
-
 tm_tunnel_ensure_exec() {
   local name="$1"
   local iface mark
@@ -352,8 +316,8 @@ tm_tunnel_ensure_undo() {
 tm_tunnel_remove_files_exec() {
   local name="$1"
   local -A row=()
-  local conf
   tm_tunnel_load "$name" row || return 1
+  [[ -n "${row[TM_TUNNEL_NAME]}" ]] || return 1
   tm_snapshot_file "$(tm_tunnel_file "$name")" || return 1
   if [[ -f "$(tm_key_file "$name")" ]]; then
     tm_snapshot_file "$(tm_key_file "$name")" || return 1
@@ -361,14 +325,7 @@ tm_tunnel_remove_files_exec() {
   if [[ -f "$(tm_pub_file "$name")" ]]; then
     tm_snapshot_file "$(tm_pub_file "$name")" || return 1
   fi
-  conf=$(tm_wg_conf_file "$name")
-  if [[ -f "$conf" ]]; then
-    tm_snapshot_file "$conf" || return 1
-  fi
   tm_tunnel_stop_exec "$name" || return 1
-  if [[ -f "$conf" ]]; then
-    tm_safe_rm "$conf" || return 1
-  fi
   if [[ -f "$(tm_key_file "$name")" ]]; then
     tm_safe_rm "$(tm_key_file "$name")" || return 1
   fi
@@ -383,7 +340,6 @@ tm_tunnel_remove_undo() {
   tm_restore_snapshot "$(tm_tunnel_file "$name")" || return 1
   tm_restore_snapshot "$(tm_key_file "$name")" || return 1
   tm_restore_snapshot "$(tm_pub_file "$name")" || return 1
-  tm_restore_snapshot "$(tm_wg_conf_file "$name")" || return 1
   if [[ -f "$(tm_tunnel_file "$name")" ]]; then
     tm_tunnel_start_exec "$name" || return 1
   fi
@@ -391,7 +347,7 @@ tm_tunnel_remove_undo() {
 
 tm_action_tunnel_delete() {
   local -A opt=()
-  local name
+  local name line="" fname="" proto=""
   tm_opts_parse opt "$@"
   tm_opts_bind_flags opt
   tm_opt_require opt name name
@@ -399,6 +355,14 @@ tm_action_tunnel_delete() {
   [[ -f "$(tm_tunnel_file "$name")" ]] || tm_die "Tunnel ${name} was not found."
   tm_plan_require_clear_journal
   tm_plan_reset
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$' \t\n' read -r fname proto _rest <<<"$line"
+    [[ -n "$fname" && -n "$proto" ]] || continue
+    tm_plan_add "Remove ${proto} forward '${fname}' for tunnel ${name}" \
+      "$(tm_shell_quote tm_forward_delete_undo "$fname" "$proto")" \
+      tm_forward_delete_exec "$fname" "$proto"
+  done < <(tm_setup_forwards_for "$name")
   tm_plan_add "Stop ${name}, remove its runtime, configuration, and private key" \
     "$(tm_shell_quote tm_tunnel_remove_undo "$name")" \
     tm_tunnel_remove_files_exec "$name"
@@ -551,10 +515,6 @@ tm_action_tunnel_test() {
   tm_opt_require opt name name
   name="${opt[name]}"
   tm_tunnel_load "$name" row || tm_die "Tunnel ${name} was not found."
-  if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]]; then
-    tm_error "[FAIL] WireGuard has been removed. Delete tunnel ${name}."
-    return 1
-  fi
   if [[ "${row[TM_TUNNEL_TYPE]}" == "forward" ]]; then
     tm_info "[PASS] Port forward ${name} has no tunnel interface."
     tm_info "Saved forwards use ${row[TM_LOCAL_TUNNEL_IP]} -> ${row[TM_REMOTE_TUNNEL_IP]}."

@@ -229,6 +229,20 @@ tm_menu_prompt_ipv4() {
   done
 }
 
+tm_menu_saved_tcp_listen() {
+  local listen="$1"
+  local other
+  local -A saved=()
+  while IFS= read -r other; do
+    [[ -n "$other" ]] || continue
+    tm_forward_load "$other" saved || continue
+    if [[ "${saved[TM_FORWARD_PROTO]:-}" == "tcp" && "${saved[TM_LISTEN_PORT]:-}" == "$listen" ]]; then
+      return 0
+    fi
+  done < <(tm_list_forwards)
+  return 1
+}
+
 tm_menu_collect_ports() {
   local -n _tm_spec=$1
   local required="$2"
@@ -261,6 +275,14 @@ tm_menu_collect_ports() {
     fi
     if tm_port_is_protected "$listen"; then
       tm_warn "Port ${listen} is reserved for SSH."
+      continue
+    fi
+    if tm_setup_spec_has_listen "$spec" "$listen"; then
+      tm_warn "Port ${listen} is already in this list."
+      continue
+    fi
+    if tm_menu_saved_tcp_listen "$listen"; then
+      tm_warn "Port ${listen} is already forwarded."
       continue
     fi
     if [[ -n "$spec" ]]; then
@@ -549,7 +571,7 @@ tm_menu_uninstall() {
   local script="" prefix=""
   script=$(tm_menu_uninstall_script) || tm_die "uninstall.sh was not found. Reinstall Tunnel Manager."
   prefix="${TM_PREFIX:-/usr/local}"
-  printf '\n%s\n' "This deletes the program, saved tunnels, forwards, logs, and leftover Tunnel Manager configs."
+  printf '\n%s\n' "This deletes the program, saved tunnels, forwards, and logs."
   printf '%s\n' "A missing file is skipped. Other firewall rules stay in place."
   if ! tm_confirm "Uninstall Tunnel Manager?"; then
     tm_info "Uninstall was not started."
@@ -603,27 +625,50 @@ tm_menu_maintenance() {
   done
 }
 
+tm_menu_leftover_ports() {
+  local -a ids=() labels=()
+  local line="" fname="" proto="" listen="" ref="" choice=""
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$' \t\n' read -r fname proto listen ref <<<"$line"
+    ids+=("$fname")
+    labels+=("${fname}  ${proto} ${listen}  tunnel ${ref} is gone")
+  done < <(tm_forward_orphan_lines)
+  if [[ "${#ids[@]}" -eq 0 ]]; then
+    tm_info "No leftover ports are saved."
+    tm_menu_pause
+    return 0
+  fi
+  choice=$(tm_menu_choose "Leftover ports" "Back" "${labels[@]}") || return 1
+  if [[ "$choice" == "0" ]]; then
+    return 0
+  fi
+  if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#ids[@]} )); then
+    tm_warn "Unknown choice."
+    return 0
+  fi
+  tm_menu_run tm_action_forward_delete --name "${ids[$((choice - 1))]}"
+}
+
 tm_menu_manage() {
-  local -a names=() labels=()
-  local name="" choice=""
+  local -a names=() labels=() extras=()
+  local name="" choice="" picked=""
   while true; do
     names=()
     labels=()
+    extras=()
+    if tm_forward_orphan_lines | grep -q .; then
+      extras+=("Leftover ports")
+    fi
+    extras+=("Maintenance")
     while IFS= read -r name; do
       [[ -n "$name" ]] || continue
       names+=("$name")
     done < <(tm_list_tunnels)
     if [[ "${#names[@]}" -eq 0 ]]; then
       tm_info "No tunnels are saved."
-      choice=$(tm_menu_choose "Manage Tunnels" "Back" "Maintenance") || return 1
-      case "$choice" in
-        1) tm_menu_maintenance ;;
-        0) return 0 ;;
-        *) tm_warn "Unknown choice." ;;
-      esac
-      continue
     fi
-    labels=("${names[@]}" "Maintenance")
+    labels=("${names[@]}" "${extras[@]}")
     choice=$(tm_menu_choose "Manage Tunnels" "Back" "${labels[@]}") || return 1
     if [[ "$choice" == "0" ]]; then
       return 0
@@ -632,11 +677,16 @@ tm_menu_manage() {
       tm_warn "Unknown choice."
       continue
     fi
-    if [[ "$choice" -eq ${#labels[@]} ]]; then
-      tm_menu_maintenance
+    if (( choice <= ${#names[@]} )); then
+      tm_menu_tunnel "${names[$((choice - 1))]}"
       continue
     fi
-    tm_menu_tunnel "${names[$((choice - 1))]}"
+    picked="${extras[$((choice - ${#names[@]} - 1))]}"
+    case "$picked" in
+      "Leftover ports") tm_menu_leftover_ports ;;
+      "Maintenance") tm_menu_maintenance ;;
+      *) tm_warn "Unknown choice." ;;
+    esac
   done
 }
 

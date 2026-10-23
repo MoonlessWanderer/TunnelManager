@@ -756,12 +756,8 @@ tm_systemctl_unit_ok() {
   local unit="$1"
   unit=${unit%.service}
   case "$unit" in
-    tunnel-manager-apply|tunnel-manager-haproxy)
+    tunnel-manager-apply)
       return 0
-      ;;
-    wg-quick@*)
-      local name=${unit#wg-quick@}
-      [[ "$name" =~ ^tm-[a-z][a-z0-9-]{0,11}$ ]]
       ;;
     *)
       return 1
@@ -810,77 +806,8 @@ tm_modprobe_argv_is_safe() {
   [[ "$1" == "modprobe" ]] || return 1
   [[ "$#" -eq 2 ]] || return 1
   case "$2" in
-    ip_gre|ip6_gre|wireguard|tcp_bbr) return 0 ;;
+    ip_gre|ip6_gre|tcp_bbr) return 0 ;;
     *) return 1 ;;
-  esac
-}
-
-tm_wg_argv_is_safe() {
-  case "$1" in
-    wg)
-      case "${2:-}" in
-        genkey|pubkey)
-          [[ "$#" -eq 2 ]]
-          ;;
-        show)
-          if [[ "$#" -eq 2 ]]; then
-            return 0
-          fi
-          [[ "$#" -eq 3 ]] || return 1
-          tm_valid_tunnel_iface "$3"
-          ;;
-        *)
-          return 1
-          ;;
-      esac
-      ;;
-    wg-quick)
-      case "${2:-}" in
-        up|down)
-          [[ "$#" -eq 3 ]] || return 1
-          tm_valid_tunnel_iface "$3"
-          ;;
-        *)
-          return 1
-          ;;
-      esac
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-tm_haproxy_argv_is_safe() {
-  local -a args=("$@")
-  local cfg="${TM_HAPROXY_CFG:-${TM_ETC:-/etc/tunnel-manager}/haproxy.cfg}"
-  local pid="${TM_HAPROXY_PID:-${TM_RUN:-/run/tunnel-manager}/haproxy.pid}"
-  [[ "${args[0]}" == "haproxy" ]] || return 1
-  case "${args[1]:-}" in
-    -c)
-      [[ "${args[2]:-}" == "-f" && "${args[3]:-}" == "$cfg" && "$#" -eq 4 ]] || return 1
-      tm_path_is_mutable "$cfg" || return 1
-      return 0
-      ;;
-    -D|-Ws)
-      [[ "${args[2]:-}" == "-f" && "${args[3]:-}" == "$cfg" ]] || return 1
-      [[ "${args[4]:-}" == "-p" && "${args[5]:-}" == "$pid" ]] || return 1
-      tm_path_is_mutable "$cfg" || return 1
-      tm_path_is_mutable "$pid" || return 1
-      if [[ "${args[1]}" == "-D" && "$#" -eq 6 ]]; then
-        return 0
-      fi
-      if [[ "${args[1]}" == "-D" && "${args[6]:-}" == "-sf" && "${args[7]:-}" =~ ^[0-9]+$ && "$#" -eq 8 ]]; then
-        return 0
-      fi
-      if [[ "${args[1]}" == "-Ws" && "$#" -eq 6 ]]; then
-        return 0
-      fi
-      return 1
-      ;;
-    *)
-      return 1
-      ;;
   esac
 }
 
@@ -1028,12 +955,6 @@ tm_argv_is_safe() {
       ;;
     modprobe)
       tm_modprobe_argv_is_safe "$@"
-      ;;
-    wg|wg-quick)
-      tm_wg_argv_is_safe "$@"
-      ;;
-    haproxy)
-      tm_haproxy_argv_is_safe "$@"
       ;;
     ping)
       tm_ping_argv_is_safe "$@"

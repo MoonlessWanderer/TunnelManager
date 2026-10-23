@@ -39,7 +39,6 @@ tm_dispatch_tunnel() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    keygen) tm_action_tunnel_keygen "$@" ;;
     create) tm_action_tunnel_create "$@" ;;
     delete) tm_action_tunnel_delete "$@" ;;
     up) tm_action_tunnel_up "$@" ;;
@@ -48,7 +47,6 @@ tm_dispatch_tunnel() {
     test) tm_action_tunnel_test "$@" ;;
     list) tm_action_tunnel_list "$@" ;;
     show) tm_action_tunnel_show "$@" ;;
-    set-peer) tm_action_tunnel_set_peer "$@" ;;
     export-peer) tm_action_tunnel_export "$@" ;;
     *)
       tm_die "Unknown tunnel command. See: tunnel-manager help"

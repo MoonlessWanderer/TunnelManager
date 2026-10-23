@@ -18,11 +18,8 @@ tm_paths_init() {
   TM_VAR="${TM_VAR:-/var/lib/tunnel-manager}"
   TM_LOG_DIR="${TM_LOG_DIR:-/var/log/tunnel-manager}"
   TM_RUN="${TM_RUN:-/run/tunnel-manager}"
-  TM_WG_DIR="${TM_WG_DIR:-/etc/wireguard}"
   TM_SYSCTL_FILE="${TM_SYSCTL_FILE:-/etc/sysctl.d/99-tunnel-manager.conf}"
   TM_BBR_FILE="${TM_BBR_FILE:-/etc/sysctl.d/98-tunnel-manager-bbr.conf}"
-  TM_HAPROXY_CFG="${TM_HAPROXY_CFG:-${TM_ETC}/haproxy.cfg}"
-  TM_HAPROXY_PID="${TM_HAPROXY_PID:-${TM_RUN}/haproxy.pid}"
   TM_BIN="${TM_BIN:-/usr/local/bin/tunnel-manager}"
   TM_LIB_INSTALL="${TM_LIB_INSTALL:-/usr/local/lib/tunnel-manager}"
 }
@@ -88,7 +85,7 @@ tm_path_has_symlink_component() {
 tm_assert_storage_roots() {
   local path norm base
   local -a roots=()
-  roots=("$TM_ETC" "$TM_VAR" "$TM_LOG_DIR" "$TM_RUN" "$TM_WG_DIR")
+  roots=("$TM_ETC" "$TM_VAR" "$TM_LOG_DIR" "$TM_RUN")
   for path in "${roots[@]}"; do
     norm=$(tm_normalize_path "$path") || tm_die "Invalid storage path: ${path}"
     case "$norm" in
@@ -106,23 +103,13 @@ tm_assert_storage_roots() {
   [[ "$TM_VAR" == /var/lib/tunnel-manager ]] || tm_die "Refusing TM_VAR=${TM_VAR}"
   [[ "$TM_LOG_DIR" == /var/log/tunnel-manager ]] || tm_die "Refusing TM_LOG_DIR=${TM_LOG_DIR}"
   [[ "$TM_RUN" == /run/tunnel-manager ]] || tm_die "Refusing TM_RUN=${TM_RUN}"
-  [[ "$TM_WG_DIR" == /etc/wireguard ]] || tm_die "Refusing TM_WG_DIR=${TM_WG_DIR}"
   [[ "$TM_SYSCTL_FILE" == /etc/sysctl.d/99-tunnel-manager.conf ]] || tm_die "Refusing TM_SYSCTL_FILE=${TM_SYSCTL_FILE}"
   [[ "$TM_BBR_FILE" == /etc/sysctl.d/98-tunnel-manager-bbr.conf ]] || tm_die "Refusing TM_BBR_FILE=${TM_BBR_FILE}"
 }
 
-tm_is_wg_conf_path() {
-  local path="$1"
-  local wg base
-  wg=$(tm_normalize_path "$TM_WG_DIR") || return 1
-  tm_path_under "$path" "$wg" || return 1
-  base=${path#"${wg}/"}
-  [[ "$base" =~ ^tm-[a-z][a-z0-9-]{0,11}\.conf$ ]]
-}
-
 tm_path_is_mutable() {
   local raw="$1"
-  local path etc var log run wg="" sysctl bbr=""
+  local path etc var log run sysctl bbr=""
   path=$(tm_normalize_path "$raw") || return 1
   etc=$(tm_normalize_path "$TM_ETC") || return 1
   var=$(tm_normalize_path "$TM_VAR") || return 1
@@ -130,13 +117,11 @@ tm_path_is_mutable() {
   run=$(tm_normalize_path "$TM_RUN") || return 1
   sysctl=$(tm_normalize_path "$TM_SYSCTL_FILE") || return 1
   bbr=$(tm_normalize_path "$TM_BBR_FILE") || return 1
-  wg=$(tm_normalize_path "$TM_WG_DIR") || return 1
   if tm_path_under "$path" "$etc" \
     || tm_path_under "$path" "$var" \
     || tm_path_under "$path" "$log" \
     || tm_path_under "$path" "$run" \
-    || [[ "$path" == "$sysctl" || "$path" == "$bbr" || "$path" == "$wg" ]] \
-    || tm_is_wg_conf_path "$path"; then
+    || [[ "$path" == "$sysctl" || "$path" == "$bbr" ]]; then
     :
   else
     return 1
@@ -173,9 +158,6 @@ tm_ensure_tree() {
   tm_mkdir_mode "$TM_VAR/snapshots" 0700
   tm_mkdir_mode "$TM_LOG_DIR" 0750
   tm_mkdir_mode "$TM_RUN" 0750
-  if [[ ! -d "$TM_WG_DIR" ]]; then
-    tm_mkdir_mode "$TM_WG_DIR" 0700 no
-  fi
 }
 
 tm_write_file() {
@@ -392,10 +374,6 @@ tm_key_file() {
 
 tm_pub_file() {
   printf '%s\n' "${TM_ETC}/keys/${1}.pub"
-}
-
-tm_wg_conf_file() {
-  printf '%s\n' "${TM_WG_DIR}/tm-${1}.conf"
 }
 
 tm_list_files() {

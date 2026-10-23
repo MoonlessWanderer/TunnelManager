@@ -34,8 +34,7 @@ only a tunnel that this run started.
 
 TCP and UDP use the same firewall NAT path. Both are IPv4 only. The tunnel
 itself may still be IPv6. A saved forward sets `net.ipv4.ip_forward=1`.
-`apply` and `down` stop a leftover HAProxy process so an older install does
-not keep listening. The system HAProxy configuration is not modified.
+The system HAProxy configuration is not modified.
 
 ## UDP
 
@@ -87,14 +86,11 @@ does not appear in the plan.
 `tunnel-manager-apply.service` is a oneshot unit. Its start command is
 `tunnel-manager apply --yes` and its stop command is `tunnel-manager down
 --yes`. Saved state is the confirmation, so boot does not prompt.
-`service enable` enables the apply unit only. Apply stops
-`tunnel-manager-haproxy.service` when that leftover unit is installed.
+`service enable` enables the apply unit only.
 
 ## Backups
 
 Archives contain an allowlisted set of members: `MANIFEST`, `host.conf`,
-`haproxy.cfg`, `tunnels/*.conf`, and `forwards/*.conf`. Key files, and
-`wireguard/tm-*.conf` from an older archive, are accepted only with
-`--include-keys`. Restore checks every member, copies the files, and does
-not apply them. The operator runs `apply` after review. New backups do not
-write WireGuard configs.
+`tunnels/*.conf`, and `forwards/*.conf`. Key files are
+accepted only with `--include-keys`. Restore checks every member, copies
+the files, and does not apply them. The operator runs `apply` after review.

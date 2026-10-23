@@ -102,9 +102,8 @@ sudo tunnel-manager backup create --output /root/tm.tar.gz
 sudo tunnel-manager backup restore --file /root/tm.tar.gz
 ```
 
-`down` removes runtime interfaces and TCP/UDP NAT rules, and stops a leftover
-HAProxy process. It keeps the saved configuration. `apply` installs that
-configuration again through the firewall.
+`down` removes runtime interfaces and TCP/UDP NAT rules. It keeps the saved
+configuration. `apply` installs that configuration again through the firewall.
 
 ## Firewall backend
 
@@ -160,7 +159,7 @@ transit.
      offers restart.
    - Maintenance has status, troubleshoot, backup, restore, apply, dry-run, and rollback.
 3. Update reinstalls the program and keeps saved tunnels.
-4. Uninstall asks once, then removes the program, saved tunnels, logs, and leftover `/etc/wireguard/tm-*.conf` files. Missing paths are ignored. Other firewall rules are not flushed.
+4. Uninstall asks once, then removes the program, saved tunnels, and logs. Missing paths are ignored. Other firewall rules are not flushed.
 5. Enable BBR. The plan sets `net.core.default_qdisc=fq` and
    `net.ipv4.tcp_congestion_control=bbr`. It does not change the default route.
 

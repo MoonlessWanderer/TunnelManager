@@ -34,8 +34,6 @@ source "${_tm_load_dir}/net.sh"
 source "${_tm_load_dir}/firewall.sh"
 # shellcheck source=gre.sh
 source "${_tm_load_dir}/gre.sh"
-# shellcheck source=haproxy.sh
-source "${_tm_load_dir}/haproxy.sh"
 # shellcheck source=forward.sh
 source "${_tm_load_dir}/forward.sh"
 # shellcheck source=tunnel.sh

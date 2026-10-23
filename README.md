@@ -58,10 +58,9 @@ Useful installer flags:
 - `--yes` is accepted and does not change network state by itself
 
 `uninstall.sh` stops Tunnel Manager through its own `down` command and removes
-its files. It does not remove `haproxy`. The menu uninstall, and
-`--purge-state`, also remove saved tunnels, logs, the Tunnel Manager sysctl
-files, and leftover `/etc/wireguard/tm-*.conf` files from older installs.
-Missing paths are ignored. Other WireGuard configs stay in place.
+its files. The menu uninstall, and `--purge-state`, also remove saved tunnels,
+forwards, logs, and the Tunnel Manager sysctl files. Missing paths are ignored.
+Firewall rules owned by other tools stay in place.
 
 ## Typical flow
 
@@ -112,8 +111,7 @@ command is IPv4. Port forwarding is IPv4 for both TCP and UDP.
   `net.ipv4.conf.<tunnel>.rp_filter=2`. A foreign sysctl drop-in is not
   overwritten. `rp_filter` is not changed for `all` or `default`.
 - TCP and UDP forwarding use the same NAT rules. The system file
-  `/etc/haproxy/haproxy.cfg` is not modified. A leftover Tunnel Manager
-  HAProxy process is stopped by `apply` and `down`.
+  `/etc/haproxy/haproxy.cfg` is not modified.
 - Listen ports and DNAT ports that match the SSH port are refused.
 - Logs still redact key-shaped strings. Backups omit key files unless
   `--include-keys` is passed, and that option prints a warning.
@@ -124,8 +122,7 @@ command is IPv4. Port forwarding is IPv4 for both TCP and UDP.
 ```text
 bin/tunnel-manager          command entry point
 lib/*.sh                    libraries
-lib/haproxy-reload.sh       leftover helper; forwarding does not use it
-systemd/*.service.in        apply unit and a leftover HAProxy unit
+systemd/*.service.in        boot apply unit
 examples/                   sample state files
 docs/                       architecture, operations, and security notes
 tests/                      unit tests and command fakes

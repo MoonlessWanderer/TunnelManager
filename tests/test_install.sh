@@ -6,7 +6,7 @@ tm_test_reset
 
 prefix="${TM_TEST_ROOT}/prefix"
 bash "${TM_REPO}/install.sh" --prefix "$prefix" --skip-packages --skip-systemd
-if [[ -f "${prefix}/bin/tunnel-manager" && -f "${prefix}/bin/tm" && -f "${prefix}/lib/tunnel-manager/load.sh" && -f "${prefix}/lib/tunnel-manager/haproxy-reload.sh" ]]; then
+if [[ -f "${prefix}/bin/tunnel-manager" && -f "${prefix}/bin/tm" && -f "${prefix}/lib/tunnel-manager/load.sh" && -f "${prefix}/lib/tunnel-manager/setup.sh" && ! -e "${prefix}/lib/tunnel-manager/haproxy-reload.sh" ]]; then
   tm_pass "install lays out the executable and libraries"
 else
   tm_fail "install layout is incomplete"
@@ -17,7 +17,7 @@ else
   tm_fail "tm does not open the menu"
 fi
 installed_version=$(bash "${prefix}/bin/tunnel-manager" version)
-tm_expect_eq "installed version" "$installed_version" "1.5.0"
+tm_expect_eq "installed version" "$installed_version" "1.6.0"
 bash "${TM_REPO}/uninstall.sh" --prefix "$prefix" --yes --skip-down
 if [[ ! -e "${prefix}/bin/tunnel-manager" && ! -e "${prefix}/bin/tm" && ! -e "${prefix}/lib/tunnel-manager" ]]; then
   tm_pass "uninstall removes installed files"
@@ -63,11 +63,11 @@ printf 'tunnel\n' >"$wg/tm-edge.conf"
 printf 'keep\n' >"$wg/wg0.conf"
 printf 'managed\n' >"$fwd"
 TM_TEST_MODE=1 TM_TEST_ROOT="$purge" \
-  TM_ETC="$etc" TM_VAR="$var" TM_LOG_DIR="$log" TM_RUN="$run" TM_WG_DIR="$wg" \
+  TM_ETC="$etc" TM_VAR="$var" TM_LOG_DIR="$log" TM_RUN="$run" \
   TM_SYSCTL_FILE="$fwd" TM_BBR_FILE="$bbr" \
   bash "${TM_REPO}/uninstall.sh" --prefix "$prefix_purge" --yes --purge-state --skip-down
-if [[ ! -e "$etc" && ! -e "$var" && ! -e "$log" && ! -e "$run" && ! -e "$wg/tm-edge.conf" && ! -e "$fwd" && ! -e "$bbr" && -f "$wg/wg0.conf" ]]; then
-  tm_pass "purge removes tunnel manager state and keeps other wireguard configs"
+if [[ ! -e "$etc" && ! -e "$var" && ! -e "$log" && ! -e "$run" && ! -e "$fwd" && ! -e "$bbr" && -f "$wg/tm-edge.conf" && -f "$wg/wg0.conf" ]]; then
+  tm_pass "purge removes tunnel manager state and leaves other config files"
 else
   tm_fail "purge did not remove only tunnel manager state"
 fi

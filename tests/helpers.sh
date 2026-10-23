@@ -97,7 +97,6 @@ tm_test_reset() {
   export TM_VAR="${TM_TEST_ROOT}/var"
   export TM_LOG_DIR="${TM_TEST_ROOT}/log"
   export TM_RUN="${TM_TEST_ROOT}/run"
-  export TM_WG_DIR="${TM_TEST_ROOT}/wireguard"
   export TM_SYSCTL_FILE="${TM_TEST_ROOT}/99-tunnel-manager.conf"
   export TM_BBR_FILE="${TM_TEST_ROOT}/98-tunnel-manager-bbr.conf"
   export TM_FAKE_ROOT="${TM_TEST_ROOT}/fake"

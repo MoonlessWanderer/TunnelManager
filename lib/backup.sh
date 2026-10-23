@@ -21,7 +21,7 @@ tm_backup_member_ok() {
   [[ "$member" != *..* ]] || return 1
   [[ "$member" != *$'\n'* ]] || return 1
   case "$member" in
-    MANIFEST|host.conf|haproxy.cfg) return 0 ;;
+    MANIFEST|host.conf) return 0 ;;
     tunnels/*.conf)
       base=${member#tunnels/}
       [[ "$base" != */* && "$base" == *.conf ]] || return 1
@@ -39,12 +39,6 @@ tm_backup_member_ok() {
       base=${member#keys/}
       [[ "$base" != */* ]] || return 1
       [[ "$base" =~ ^[a-z][a-z0-9-]{0,11}\.(key|pub)$ ]] || return 1
-      return 0
-      ;;
-    wireguard/tm-*.conf)
-      [[ "$include_keys" == "1" ]] || return 1
-      base=${member#wireguard/}
-      [[ "$base" =~ ^tm-[a-z][a-z0-9-]{0,11}\.conf$ ]] || return 1
       return 0
       ;;
     *)
@@ -97,9 +91,6 @@ tm_backup_create_exec() {
   mkdir -p -- "$stage/tunnels" "$stage/forwards"
   if [[ -f "$(tm_host_file)" ]]; then
     cp -- "$(tm_host_file)" "$stage/host.conf" || return 1
-  fi
-  if [[ -f "$TM_HAPROXY_CFG" ]]; then
-    cp -- "$TM_HAPROXY_CFG" "$stage/haproxy.cfg" || return 1
   fi
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
@@ -170,10 +161,6 @@ tm_backup_install_tree() {
     cp -- "$stage/host.conf" "$(tm_host_file)" || return 1
     chmod 0600 "$(tm_host_file)" || return 1
   fi
-  if [[ -f "$stage/haproxy.cfg" ]]; then
-    cp -- "$stage/haproxy.cfg" "$TM_HAPROXY_CFG" || return 1
-    chmod 0644 "$TM_HAPROXY_CFG" || return 1
-  fi
   for f in "$stage/tunnels"/*.conf; do
     [[ -f "$f" ]] || continue
     base=$(basename -- "$f")
@@ -192,12 +179,6 @@ tm_backup_install_tree() {
       base=$(basename -- "$f")
       cp -- "$f" "${TM_ETC}/keys/${base}" || return 1
       chmod 0600 "${TM_ETC}/keys/${base}" || return 1
-    done
-    for f in "$stage/wireguard"/*.conf; do
-      [[ -f "$f" ]] || continue
-      base=$(basename -- "$f")
-      cp -- "$f" "${TM_WG_DIR}/${base}" || return 1
-      chmod 0600 "${TM_WG_DIR}/${base}" || return 1
     done
   fi
 }

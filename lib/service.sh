@@ -50,16 +50,9 @@ tm_render_unit() {
   local src="$1"
   local bin="${TM_BIN}"
   local lib="${TM_LIB_INSTALL}"
-  local haproxy="/usr/sbin/haproxy"
-  if tm_cmd_available haproxy && [[ "${TM_TEST_MODE:-0}" != "1" ]]; then
-    haproxy=$(command -v haproxy)
-  fi
   sed \
     -e "s|@BIN@|${bin}|g" \
     -e "s|@LIB@|${lib}|g" \
-    -e "s|@HAPROXY@|${haproxy}|g" \
-    -e "s|@CFG@|${TM_HAPROXY_CFG}|g" \
-    -e "s|@PID@|${TM_HAPROXY_PID}|g" \
     "$src"
 }
 
@@ -74,15 +67,17 @@ tm_service_install_units_exec() {
     return 1
   }
   mkdir -p -- "$(tm_systemd_dir)" || return 1
-  for src in "$dir"/*.service.in; do
-    [[ -f "$src" ]] || continue
-    base=$(basename -- "$src" .in)
-    dest="$(tm_systemd_dir)/${base}"
-    rendered=$(tm_render_unit "$src") || return 1
-    printf '%s\n' "$rendered" >"$dest" || return 1
-    chmod 0644 "$dest" || return 1
-    tm_info "Installed ${dest}"
-  done
+  src="${dir}/tunnel-manager-apply.service.in"
+  [[ -f "$src" ]] || {
+    tm_error "Systemd templates were not found."
+    return 1
+  }
+  base=$(basename -- "$src" .in)
+  dest="$(tm_systemd_dir)/${base}"
+  rendered=$(tm_render_unit "$src") || return 1
+  printf '%s\n' "$rendered" >"$dest" || return 1
+  chmod 0644 "$dest" || return 1
+  tm_info "Installed ${dest}"
 }
 
 tm_action_service_enable() {
@@ -111,7 +106,6 @@ tm_service_enable_exec() {
 tm_service_disable_exec() {
   if tm_use_systemd; then
     tm_run systemctl disable tunnel-manager-apply.service >/dev/null 2>&1 || true
-    tm_run systemctl disable tunnel-manager-haproxy.service >/dev/null 2>&1 || true
   fi
   return 0
 }
@@ -135,5 +129,4 @@ tm_action_service_status() {
     return 0
   fi
   tm_run systemctl --no-pager status tunnel-manager-apply.service || true
-  tm_run systemctl --no-pager status tunnel-manager-haproxy.service || true
 }

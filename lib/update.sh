@@ -127,7 +127,6 @@ tm_update_snapshot_exec() {
     cp -a -- "$prefix/share/tunnel-manager" "$snap/share/" || return 1
   fi
   tm_update_copy_if_present /etc/systemd/system/tunnel-manager-apply.service "$snap/units/tunnel-manager-apply.service" || return 1
-  tm_update_copy_if_present /etc/systemd/system/tunnel-manager-haproxy.service "$snap/units/tunnel-manager-haproxy.service" || return 1
   printf '%s\n' "$present" >"$snap/present"
   printf '%s\n' "$prefix" >"$snap/prefix"
   chmod 0600 "$snap/present" "$snap/prefix" || true
@@ -166,9 +165,6 @@ tm_update_restore_exec() {
   fi
   if [[ -f "$snap/units/tunnel-manager-apply.service" ]]; then
     cp -a -- "$snap/units/tunnel-manager-apply.service" /etc/systemd/system/tunnel-manager-apply.service || return 1
-  fi
-  if [[ -f "$snap/units/tunnel-manager-haproxy.service" ]]; then
-    cp -a -- "$snap/units/tunnel-manager-haproxy.service" /etc/systemd/system/tunnel-manager-haproxy.service || return 1
   fi
 }
 
