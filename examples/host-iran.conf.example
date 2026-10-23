@@ -1,0 +1,6 @@
+# Copy to /etc/tunnel-manager/host.conf through: tunnel-manager init
+TM_HOST_ROLE=iran
+TM_HOST_PUBLIC_IP=203.0.113.10
+TM_HOST_WAN_IFACE=eth0
+TM_SSH_PORT=22
+TM_FW_BACKEND=auto

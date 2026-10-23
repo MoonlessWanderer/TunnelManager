@@ -1,0 +1,6 @@
+# ShellCheck configuration for Tunnel Manager.
+external-sources=true
+source-path=SCRIPTDIR
+source-path=lib
+source-path=bin
+source-path=tests

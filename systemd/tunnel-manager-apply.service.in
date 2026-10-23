@@ -1,0 +1,17 @@
+[Unit]
+Description=Apply saved Tunnel Manager tunnels and forwards
+After=network-online.target
+Wants=network-online.target
+Documentation=file:@LIB@/../share/tunnel-manager/docs/OPERATIONS.md
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=TM_TEST_MODE=0
+ExecStart=@BIN@ apply --yes
+ExecStop=@BIN@ down --yes
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

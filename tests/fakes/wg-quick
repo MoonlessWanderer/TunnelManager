@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="${TM_FAKE_ROOT:?}"
+LOG="${ROOT}/wg-quick.log"
+mkdir -p -- "$ROOT"
+printf '%s\n' "$*" >>"$LOG"
+action="${1:-}"
+iface="${2:-}"
+conf="${TM_WG_DIR}/${iface}.conf"
+if [[ "$action" == "up" ]]; then
+  [[ -f "$conf" ]] || exit 1
+  text=$(tr -d '\r' <"$conf")
+  [[ "$text" == *"Table = off"* ]] || exit 1
+  [[ "$text" != *"0.0.0.0/0"* ]] || exit 1
+  printf '%s\n' "$iface" >>"${ROOT}/wg.up"
+  printf '%s\n' "$iface" >>"${ROOT}/ip.links"
+  exit 0
+fi
+if [[ "$action" == "down" ]]; then
+  if [[ -f "${ROOT}/wg.up" ]]; then
+    grep -v "^${iface}$" "${ROOT}/wg.up" >"${ROOT}/wg.up.tmp" || true
+    mv -f "${ROOT}/wg.up.tmp" "${ROOT}/wg.up"
+  fi
+  exit 0
+fi
+exit 97

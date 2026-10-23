@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="${TM_FAKE_ROOT:?}"
+printf '%s\n' "$*" >>"${ROOT}/ping.log"
+if [[ -f "${ROOT}/ping.fail" ]]; then
+  exit 1
+fi
+exit 0

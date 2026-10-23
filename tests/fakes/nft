@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Fake nft. Flush is refused. Rules are stored with handles.
+set -euo pipefail
+ROOT="${TM_FAKE_ROOT:?}"
+STATE="${ROOT}/nft.state"
+LOG="${ROOT}/nft.log"
+mkdir -p -- "$ROOT"
+touch "$STATE"
+printf '%s\n' "$*" >>"$LOG"
+
+for arg in "$@"; do
+  case "$arg" in
+    flush|Flush|FLUSH)
+      printf '%s\n' "forbidden" >>"$LOG"
+      exit 99
+      ;;
+  esac
+done
+
+args=("$@")
+if [[ "${args[0]:-}" == "-a" ]]; then
+  args=("${args[@]:1}")
+fi
+
+has_table() {
+  grep -q '^TABLE	inet	tunnel_manager$' "$STATE"
+}
+
+has_chain() {
+  grep -q "^CHAIN	inet	tunnel_manager	${1}	" "$STATE"
+}
+
+next_handle() {
+  local n=1
+  if [[ -f "${ROOT}/nft.handle" ]]; then
+    n=$(tr -d '[:space:]' <"${ROOT}/nft.handle")
+  fi
+  printf '%s\n' "$((n + 1))" >"${ROOT}/nft.handle"
+  printf '%s\n' "$n"
+}
+
+cmd="${args[0]:-}"
+case "$cmd" in
+  list)
+    case "${args[1]:-}" in
+      ruleset)
+        if [[ -f "${ROOT}/nft.foreign" ]]; then
+          cat "${ROOT}/nft.foreign"
+          printf '\n'
+        fi
+        if has_table; then
+          printf '%s\n' "table inet tunnel_manager {"
+          while IFS= read -r line; do
+            [[ "$line" == CHAIN$'\t'inet$'\t'tunnel_manager$'\t'* ]] || continue
+            name=${line#CHAIN$'\t'inet$'\t'tunnel_manager$'\t'}
+            def=${name#*$'\t'}
+            name=${name%%$'\t'*}
+            printf '  chain %s {\n' "$name"
+            printf '    %s\n' "$def"
+            printf '%s\n' "  }"
+          done <"$STATE"
+          while IFS= read -r line; do
+            [[ "$line" == RULE$'\t'* ]] || continue
+            printf '    %s\n' "${line##*$'\t'}"
+          done <"$STATE"
+          printf '%s\n' "}"
+        fi
+        exit 0
+        ;;
+      table)
+        has_table
+        exit $?
+        ;;
+      chain)
+        chain="${args[4]:-}"
+        has_chain "$chain" || exit 1
+        while IFS= read -r line; do
+          [[ "$line" == RULE$'\t'inet$'\t'tunnel_manager$'\t'"${chain}"$'\t'* ]] || continue
+          rest=${line#RULE$'\t'inet$'\t'tunnel_manager$'\t'"${chain}"$'\t'}
+          handle=${rest%%$'\t'*}
+          spec=${rest#*$'\t'}
+          printf '    %s # handle %s\n' "$spec" "$handle"
+        done <"$STATE"
+        exit 0
+        ;;
+      *)
+        exit 97
+        ;;
+    esac
+    ;;
+  add)
+    case "${args[1]:-}" in
+      table)
+        printf 'TABLE\tinet\ttunnel_manager\n' >>"$STATE"
+        exit 0
+        ;;
+      chain)
+        printf 'CHAIN\tinet\ttunnel_manager\t%s\t%s\n' "${args[4]}" "${args[5]}" >>"$STATE"
+        exit 0
+        ;;
+      rule)
+        handle=$(next_handle)
+        spec="${args[*]:5}"
+        printf 'RULE\tinet\ttunnel_manager\t%s\t%s\t%s\n' "${args[4]}" "$handle" "$spec" >>"$STATE"
+        exit 0
+        ;;
+      *)
+        exit 97
+        ;;
+    esac
+    ;;
+  delete)
+    if [[ "${args[1]:-}" == "rule" && "${args[5]:-}" == "handle" ]]; then
+      handle="${args[6]}"
+      chain="${args[4]}"
+      grep -v "^RULE	inet	tunnel_manager	${chain}	${handle}	" "$STATE" >"${STATE}.tmp" || true
+      mv -f "${STATE}.tmp" "$STATE"
+      exit 0
+    fi
+    exit 1
+    ;;
+  *)
+    exit 97
+    ;;
+esac

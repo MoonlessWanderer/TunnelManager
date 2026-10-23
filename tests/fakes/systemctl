@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="${TM_FAKE_ROOT:?}"
+LOG="${ROOT}/systemctl.log"
+mkdir -p -- "$ROOT"
+printf '%s\n' "$*" >>"$LOG"
+for arg in "$@"; do
+  case "$arg" in
+    ssh|sshd|ssh.service|sshd.service|networking|networking.service|NetworkManager|firewalld)
+      printf '%s\n' "forbidden unit ${arg}" >>"$LOG"
+      exit 99
+      ;;
+  esac
+done
+if [[ "${1:-}" == "is-active" || "${2:-}" == "is-active" ]]; then
+  printf '%s\n' "inactive"
+fi
+exit 0

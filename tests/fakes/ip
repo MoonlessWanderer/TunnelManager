@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Fake ip(8). Route changes other than show/list/get are refused.
+set -euo pipefail
+ROOT="${TM_FAKE_ROOT:?}"
+LOG="${ROOT}/ip.log"
+LINKS="${ROOT}/ip.links"
+ADDRS="${ROOT}/ip.addrs"
+mkdir -p -- "$ROOT"
+touch "$LINKS" "$ADDRS"
+printf '%s\n' "$*" >>"$LOG"
+
+if [[ "${1:-}" == "-4" ]]; then
+  shift
+fi
+if [[ "${1:-}" == "-o" ]]; then
+  shift
+fi
+
+case "${1:-}" in
+  route)
+    case "${2:-}" in
+      show|list|get)
+        if [[ "${3:-}" == "default" || "${2:-}" == "show" ]]; then
+          printf '%s\n' "default via 192.0.2.1 dev eth0 proto dhcp src 192.0.2.10"
+        fi
+        exit 0
+        ;;
+      *)
+        printf '%s\n' "forbidden route change" >>"$LOG"
+        exit 99
+        ;;
+    esac
+    ;;
+  link)
+    case "${2:-}" in
+      show)
+        name=""
+        prev=""
+        for arg in "$@"; do
+          if [[ "$prev" == "dev" ]]; then
+            name="$arg"
+          fi
+          prev="$arg"
+        done
+        if grep -q "^${name}$" "$LINKS"; then
+          printf '2: %s: <UP> mtu 1420\n' "$name"
+          exit 0
+        fi
+        exit 1
+        ;;
+      add)
+        name="${4:-}"
+        printf '%s\n' "$name" >>"$LINKS"
+        exit 0
+        ;;
+      set)
+        exit 0
+        ;;
+      del|delete)
+        name="${4:-}"
+        grep -v "^${name}$" "$LINKS" >"${LINKS}.tmp" || true
+        mv -f "${LINKS}.tmp" "$LINKS"
+        exit 0
+        ;;
+      *)
+        exit 97
+        ;;
+    esac
+    ;;
+  addr)
+    case "${2:-}" in
+      show)
+        name=""
+        prev=""
+        for arg in "$@"; do
+          if [[ "$prev" == "dev" ]]; then
+            name="$arg"
+          fi
+          prev="$arg"
+        done
+        grep "^${name} " "$ADDRS" || true
+        exit 0
+        ;;
+      add)
+        printf '%s %s\n' "${5:-}" "${3:-}" >>"$ADDRS"
+        exit 0
+        ;;
+      del|delete)
+        exit 0
+        ;;
+      *)
+        exit 97
+        ;;
+    esac
+    ;;
+  *)
+    exit 97
+    ;;
+esac

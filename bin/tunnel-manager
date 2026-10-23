@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Tunnel Manager entry point.
+set -euo pipefail
+IFS=$'\n\t'
+
+tm_resolve_lib_dir() {
+  if [[ -n "${TM_LIB_DIR:-}" ]]; then
+    cd -P "$TM_LIB_DIR" && pwd
+    return 0
+  fi
+  local src dir
+  src=${BASH_SOURCE[0]}
+  while [[ -L "$src" ]]; do
+    dir=$(cd -P "$(dirname "$src")" && pwd)
+    src=$(readlink "$src")
+    [[ "$src" != /* ]] && src="${dir}/${src}"
+  done
+  dir=$(cd -P "$(dirname "$src")" && pwd)
+  if [[ -f "${dir}/../lib/load.sh" ]]; then
+    cd -P "${dir}/../lib" && pwd
+    return 0
+  fi
+  if [[ -f "${dir}/../lib/tunnel-manager/load.sh" ]]; then
+    cd -P "${dir}/../lib/tunnel-manager" && pwd
+    return 0
+  fi
+  if [[ -f /usr/local/lib/tunnel-manager/load.sh ]]; then
+    printf '%s\n' /usr/local/lib/tunnel-manager
+    return 0
+  fi
+  printf '%s\n' "Cannot locate Tunnel Manager libraries." >&2
+  return 1
+}
+
+TM_LIB_DIR=$(tm_resolve_lib_dir)
+# shellcheck source=../lib/load.sh
+source "${TM_LIB_DIR}/load.sh"
+tm_main "$@"

@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Fake iptables used by unit tests. It never flushes.
+set -euo pipefail
+ROOT="${TM_FAKE_ROOT:?}"
+STATE="${ROOT}/iptables.state"
+LOG="${ROOT}/iptables.log"
+mkdir -p -- "$ROOT"
+touch "$STATE"
+printf '%s\n' "$*" >>"$LOG"
+
+if [[ "${1:-}" == "-F" || "${1:-}" == "--flush" ]]; then
+  printf '%s\n' "forbidden" >>"$LOG"
+  exit 99
+fi
+
+for arg in "$@"; do
+  if [[ "$arg" == "-F" || "$arg" == "--flush" ]]; then
+    printf '%s\n' "forbidden" >>"$LOG"
+    exit 99
+  fi
+done
+
+if [[ "${1:-}" == "-V" || "${1:-}" == "--version" ]]; then
+  if [[ -f "${ROOT}/iptables.version" ]]; then
+    cat "${ROOT}/iptables.version"
+  else
+    printf '%s\n' "iptables v1.8.9 (nf_tables)"
+  fi
+  exit 0
+fi
+
+table="filter"
+args=("$@")
+i=0
+while [[ "$i" -lt "${#args[@]}" ]]; do
+  case "${args[$i]}" in
+    -t|--table)
+      table="${args[$((i + 1))]}"
+      i=$((i + 2))
+      ;;
+    -n|--numeric|-v|--verbose|-x|--exact|--line-numbers)
+      i=$((i + 1))
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+action="${args[$i]:-}"
+chain="${args[$((i + 1))]:-}"
+
+builtin_chain() {
+  case "$1:$2" in
+    filter:INPUT|filter:OUTPUT|filter:FORWARD|nat:PREROUTING|nat:INPUT|nat:OUTPUT|nat:POSTROUTING)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+chain_exists() {
+  local t="$1" c="$2"
+  if builtin_chain "$t" "$c"; then
+    return 0
+  fi
+  grep -q "^CHAIN ${t} ${c}$" "$STATE"
+}
+
+print_rules() {
+  local t="$1" c="$2" line spec
+  while IFS= read -r line; do
+    [[ "$line" == RULE$'\t'"${t}"$'\t'"${c}"$'\t'* ]] || continue
+    spec=${line#RULE$'\t'"${t}"$'\t'"${c}"$'\t'}
+    printf -- '-A %s %s\n' "$c" "$spec"
+  done <"$STATE"
+}
+
+case "$action" in
+  -L|--list)
+    chain_exists "$table" "$chain"
+    exit $?
+    ;;
+  -S|--list-rules)
+    if [[ -z "$chain" ]]; then
+      printf '%s\n' "-P INPUT ACCEPT" "-P FORWARD ACCEPT" "-P OUTPUT ACCEPT"
+      if [[ -f "${ROOT}/iptables.user-rules" ]]; then
+        cat "${ROOT}/iptables.user-rules"
+      fi
+      exit 0
+    fi
+    chain_exists "$table" "$chain" || exit 1
+    print_rules "$table" "$chain"
+    exit 0
+    ;;
+  -N|--new-chain)
+    if chain_exists "$table" "$chain"; then
+      exit 1
+    fi
+    printf 'CHAIN %s %s\n' "$table" "$chain" >>"$STATE"
+    exit 0
+    ;;
+  -X|--delete-chain)
+    if grep -q "^RULE	${table}	${chain}	" "$STATE"; then
+      exit 1
+    fi
+    grep -v "^CHAIN ${table} ${chain}$" "$STATE" >"${STATE}.tmp" || true
+    mv -f "${STATE}.tmp" "$STATE"
+    exit 0
+    ;;
+  -A|--append|-I|--insert|-D|--delete|-C|--check)
+    spec_start=$((i + 2))
+    if [[ "$action" == "-I" || "$action" == "--insert" ]]; then
+      if [[ "${args[$((i + 2))]:-}" =~ ^[0-9]+$ ]]; then
+        spec_start=$((i + 3))
+      fi
+    fi
+    spec="${args[*]:$spec_start}"
+    if [[ "$action" == "-C" || "$action" == "--check" || "$action" == "-D" || "$action" == "--delete" ]]; then
+      line_match="RULE	${table}	${chain}	${spec}"
+      if grep -F -q -x "$line_match" "$STATE"; then
+        if [[ "$action" == "-D" || "$action" == "--delete" ]]; then
+          grep -F -v -x "$line_match" "$STATE" >"${STATE}.tmp" || true
+          mv -f "${STATE}.tmp" "$STATE"
+        fi
+        exit 0
+      fi
+      exit 1
+    fi
+    chain_exists "$table" "$chain" || exit 1
+    printf 'RULE\t%s\t%s\t%s\n' "$table" "$chain" "$spec" >>"$STATE"
+    exit 0
+    ;;
+  *)
+    printf 'unsupported iptables action\n' >&2
+    exit 97
+    ;;
+esac

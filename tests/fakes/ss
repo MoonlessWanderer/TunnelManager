@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="${TM_FAKE_ROOT:?}"
+printf '%s\n' "$*" >>"${ROOT}/ss.log"
+exit 0

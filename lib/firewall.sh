@@ -1,0 +1,520 @@
+# SPDX-License-Identifier: MIT
+# shellcheck shell=bash disable=SC2034
+# Tunnel Manager — firewall backend selection and dedicated NAT/filter chains.
+# Rules are added and deleted individually. The firewall is never flushed.
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  printf '%s\n' "firewall.sh is a library and must be sourced." >&2
+  exit 1
+fi
+
+if [[ -n "${TM_FIREWALL_LOADED:-}" ]]; then
+  return 0
+fi
+TM_FIREWALL_LOADED=1
+
+tm_fw_classify() {
+  local ipt_version="$1"
+  local nft_present="$2"
+  if [[ -z "$ipt_version" && "$nft_present" == "0" ]]; then
+    printf 'none\n'
+    return 1
+  fi
+  if [[ -n "$ipt_version" && "$ipt_version" != *nf_tables* && "$nft_present" == "1" ]]; then
+    printf 'conflict-possible\n'
+    return 0
+  fi
+  if [[ -n "$ipt_version" ]]; then
+    printf 'iptables\n'
+    return 0
+  fi
+  printf 'nft\n'
+  return 0
+}
+
+tm_iptables_save_has_rules() {
+  local text="$1"
+  local line
+  while IFS= read -r line; do
+    [[ "$line" == -A\ * || "$line" == -I\ * ]] && return 0
+  done <<<"$text"
+  return 1
+}
+
+tm_nft_text_has_table() {
+  local text="$1"
+  [[ "$text" == *"table "* ]]
+}
+
+tm_fw_resolve_conflict() {
+  local ipt_rules="$1"
+  local nft_rules="$2"
+  local pinned="${3:-auto}"
+  case "$pinned" in
+    iptables|nft)
+      printf '%s\n' "$pinned"
+      return 0
+      ;;
+    auto) ;;
+    *) return 1 ;;
+  esac
+  if [[ "$ipt_rules" == "yes" && "$nft_rules" == "yes" ]]; then
+    return 1
+  fi
+  if [[ "$nft_rules" == "yes" ]]; then
+    printf 'nft\n'
+    return 0
+  fi
+  printf 'iptables\n'
+}
+
+tm_fw_snat_decision() {
+  local mode="$1"
+  local dest="$2"
+  local local_tun="$3"
+  local peer_tun="$4"
+  case "$mode" in
+    always)
+      printf 'yes\n'
+      ;;
+    never)
+      printf 'no\n'
+      ;;
+    auto)
+      if [[ "$dest" == "$local_tun" ]]; then
+        printf 'no\n'
+      elif [[ "$dest" == "$peer_tun" || "$dest" != "$local_tun" ]]; then
+        printf 'yes\n'
+      else
+        return 1
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+tm_fw_comment() {
+  printf 'tm:%s\n' "$1"
+}
+
+tm_fw_probe_versions() {
+  local ipt_version="" nft_present=0
+  if tm_cmd_available iptables; then
+    ipt_version=$(tm_exec iptables -V 2>/dev/null || true)
+  fi
+  if tm_cmd_available nft; then
+    nft_present=1
+  fi
+  printf '%s\n' "$ipt_version"
+  printf '%s\n' "$nft_present"
+}
+
+tm_fw_active_backend() {
+  local pinned="${TM_FW_BACKEND:-}"
+  local -A host=()
+  local -a probe=()
+  local ipt_version nft_present classified ipt_rules="no" nft_rules="no"
+  local ipt_text="" nft_text=""
+  if [[ -z "$pinned" && -f "$(tm_host_file)" ]]; then
+    if tm_kv_read "$(tm_host_file)" host; then
+      pinned="${host[TM_FW_BACKEND]:-auto}"
+    fi
+  fi
+  [[ -n "$pinned" ]] || pinned="auto"
+  tm_valid_fw_backend "$pinned" || {
+    tm_error "Invalid firewall backend '${pinned}'."
+    return 1
+  }
+  mapfile -t probe < <(tm_fw_probe_versions)
+  ipt_version="${probe[0]:-}"
+  nft_present="${probe[1]:-0}"
+  classified=$(tm_fw_classify "$ipt_version" "$nft_present") || {
+    tm_error "No iptables or nftables backend is available."
+    return 1
+  }
+  if [[ "$classified" == "iptables" || "$classified" == "nft" ]]; then
+    if [[ "$pinned" != "auto" && "$pinned" != "$classified" ]]; then
+      if ! tm_cmd_available "$pinned"; then
+        tm_error "Pinned firewall backend ${pinned} is not available."
+        return 1
+      fi
+      tm_warn "Using pinned backend ${pinned}. Tunnel Manager will not mix it with ${classified}."
+      printf '%s\n' "$pinned"
+      return 0
+    fi
+    printf '%s\n' "$classified"
+    return 0
+  fi
+  if tm_cmd_available iptables; then
+    ipt_text=$(tm_exec iptables -S 2>/dev/null || true)
+    if tm_iptables_save_has_rules "$ipt_text"; then
+      ipt_rules="yes"
+    fi
+  fi
+  if tm_cmd_available nft; then
+    nft_text=$(tm_exec nft list ruleset 2>/dev/null || true)
+    if tm_nft_text_has_table "$nft_text"; then
+      nft_rules="yes"
+    fi
+  fi
+  if ! classified=$(tm_fw_resolve_conflict "$ipt_rules" "$nft_rules" "$pinned"); then
+    tm_error "Both legacy iptables and nftables already have rules."
+    tm_error "Set TM_FW_BACKEND to iptables or nft. Tunnel Manager will not mix them."
+    return 1
+  fi
+  printf '%s\n' "$classified"
+}
+
+tm_iptables_chain_exists() {
+  local table="$1"
+  local chain="$2"
+  tm_run_quiet iptables -t "$table" -n -L "$chain" >/dev/null 2>&1
+}
+
+tm_iptables_chain_rules() {
+  local table="$1"
+  local chain="$2"
+  if ! tm_iptables_chain_exists "$table" "$chain"; then
+    return 0
+  fi
+  tm_run_quiet iptables -t "$table" -S "$chain"
+}
+
+tm_iptables_ensure_chain() {
+  local table="$1"
+  local chain="$2"
+  if tm_iptables_chain_exists "$table" "$chain"; then
+    return 0
+  fi
+  tm_must iptables -t "$table" -N "$chain"
+}
+
+tm_iptables_ensure_jump() {
+  local table="$1"
+  local from="$2"
+  local to="$3"
+  local comment="$4"
+  if tm_run_quiet iptables -t "$table" -C "$from" -m comment --comment "$comment" -j "$to" >/dev/null 2>&1; then
+    return 0
+  fi
+  tm_must iptables -t "$table" -I "$from" 1 -m comment --comment "$comment" -j "$to"
+}
+
+tm_iptables_ensure_base() {
+  tm_iptables_ensure_chain nat TM_PREROUTING || return 1
+  tm_iptables_ensure_chain nat TM_POSTROUTING || return 1
+  tm_iptables_ensure_chain filter TM_FORWARD || return 1
+  tm_iptables_ensure_chain filter TM_INPUT || return 1
+  tm_iptables_ensure_jump nat PREROUTING TM_PREROUTING tm:jump:nat-prerouting || return 1
+  tm_iptables_ensure_jump nat POSTROUTING TM_POSTROUTING tm:jump:nat-postrouting || return 1
+  tm_iptables_ensure_jump filter FORWARD TM_FORWARD tm:jump:filter-forward || return 1
+  tm_iptables_ensure_jump filter INPUT TM_INPUT tm:jump:filter-input || return 1
+}
+
+tm_iptables_add_if_missing() {
+  local -a rule=("$@")
+  local -a check=()
+  local i
+  check=("${rule[@]}")
+  for i in "${!check[@]}"; do
+    if [[ "${check[$i]}" == "-A" ]]; then
+      check[i]="-C"
+      break
+    fi
+  done
+  if tm_run_quiet "${check[@]}" >/dev/null 2>&1; then
+    return 0
+  fi
+  tm_must "${rule[@]}"
+}
+
+tm_iptables_delete_comment() {
+  local table="$1"
+  local chain="$2"
+  local comment="$3"
+  local line prefix=""
+  local -a spec=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    [[ "$line" == *"--comment ${comment}"* || "$line" == *"--comment \"${comment}\""* ]] || continue
+    [[ "$line" == "-A ${chain} "* ]] || continue
+    prefix="-A ${chain} "
+    read -r -a spec <<<"${line#"${prefix}"}"
+    tm_must iptables -t "$table" -D "$chain" "${spec[@]}" || return 1
+  done < <(tm_iptables_chain_rules "$table" "$chain")
+}
+
+tm_iptables_chain_empty() {
+  local table="$1"
+  local chain="$2"
+  local line
+  while IFS= read -r line; do
+    [[ "$line" == -A\ * ]] && return 1
+  done < <(tm_iptables_chain_rules "$table" "$chain")
+  return 0
+}
+
+tm_iptables_gc() {
+  local table chain from comment row
+  local -a rows=(
+    "nat TM_PREROUTING PREROUTING tm:jump:nat-prerouting"
+    "nat TM_POSTROUTING POSTROUTING tm:jump:nat-postrouting"
+    "filter TM_FORWARD FORWARD tm:jump:filter-forward"
+    "filter TM_INPUT INPUT tm:jump:filter-input"
+  )
+  for row in "${rows[@]}"; do
+    read -r table chain from comment <<<"$row"
+    tm_iptables_chain_exists "$table" "$chain" || continue
+    if tm_iptables_chain_empty "$table" "$chain"; then
+      tm_run_quiet iptables -t "$table" -D "$from" -m comment --comment "$comment" -j "$chain" >/dev/null 2>&1 || true
+      tm_must iptables -t "$table" -X "$chain" || return 1
+    fi
+  done
+}
+
+tm_iptables_udp_apply_exec() {
+  local name="$1"
+  local iface="$2"
+  local lport="$3"
+  local dest_ip="$4"
+  local dest_port="$5"
+  local source_ip="$6"
+  local do_snat="$7"
+  local c_dnat c_snat c_fwd c_ret
+  c_dnat=$(tm_fw_comment "udp:${name}:dnat")
+  c_snat=$(tm_fw_comment "udp:${name}:snat")
+  c_fwd=$(tm_fw_comment "udp:${name}:fwd")
+  c_ret=$(tm_fw_comment "udp:${name}:fwdret")
+  tm_iptables_ensure_base || return 1
+  tm_iptables_add_if_missing \
+    iptables -t nat -A TM_PREROUTING -i "$iface" -p udp --dport "$lport" \
+    -m comment --comment "$c_dnat" -j DNAT --to-destination "${dest_ip}:${dest_port}" || return 1
+  if [[ "$do_snat" == "yes" ]]; then
+    tm_iptables_add_if_missing \
+      iptables -t nat -A TM_POSTROUTING -p udp -d "$dest_ip" --dport "$dest_port" \
+      -m comment --comment "$c_snat" -j SNAT --to-source "$source_ip" || return 1
+  fi
+  tm_iptables_add_if_missing \
+    iptables -t filter -A TM_FORWARD -p udp -d "$dest_ip" --dport "$dest_port" \
+    -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment "$c_fwd" -j ACCEPT || return 1
+  tm_iptables_add_if_missing \
+    iptables -t filter -A TM_FORWARD -p udp -s "$dest_ip" --sport "$dest_port" \
+    -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$c_ret" -j ACCEPT || return 1
+}
+
+tm_iptables_udp_delete_exec() {
+  local name="$1"
+  tm_iptables_delete_comment nat TM_PREROUTING "$(tm_fw_comment "udp:${name}:dnat")" || return 1
+  tm_iptables_delete_comment nat TM_POSTROUTING "$(tm_fw_comment "udp:${name}:snat")" || return 1
+  tm_iptables_delete_comment filter TM_FORWARD "$(tm_fw_comment "udp:${name}:fwd")" || return 1
+  tm_iptables_delete_comment filter TM_FORWARD "$(tm_fw_comment "udp:${name}:fwdret")" || return 1
+  tm_iptables_gc || return 1
+}
+
+tm_iptables_input_apply_exec() {
+  local kind="$1"
+  local name="$2"
+  local iface="$3"
+  local port="${4:-}"
+  local comment
+  comment=$(tm_fw_comment "${kind}:${name}:input")
+  tm_iptables_ensure_base || return 1
+  if [[ "$kind" == "gre" ]]; then
+    tm_iptables_add_if_missing \
+      iptables -t filter -A TM_INPUT -i "$iface" -p gre \
+      -m comment --comment "$comment" -j ACCEPT
+  else
+    tm_iptables_add_if_missing \
+      iptables -t filter -A TM_INPUT -i "$iface" -p udp --dport "$port" \
+      -m conntrack --ctstate NEW,ESTABLISHED \
+      -m comment --comment "$comment" -j ACCEPT
+  fi
+}
+
+tm_iptables_input_delete_exec() {
+  local kind="$1"
+  local name="$2"
+  tm_iptables_delete_comment filter TM_INPUT "$(tm_fw_comment "${kind}:${name}:input")" || return 1
+  tm_iptables_gc || return 1
+}
+
+tm_nft_handles_for_comment() {
+  local text="$1"
+  local comment="$2"
+  local line
+  while IFS= read -r line; do
+    [[ "$line" == *"comment \"${comment}\""* || "$line" == *"comment ${comment}"* ]] || continue
+    if [[ "$line" =~ handle[[:space:]]+([0-9]+) ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+    fi
+  done <<<"$text"
+}
+
+tm_nft_chain_text() {
+  local chain="$1"
+  tm_run_quiet nft -a list chain inet tunnel_manager "$chain" 2>/dev/null || true
+}
+
+tm_nft_comment_present() {
+  local chain="$1"
+  local comment="$2"
+  local text
+  text=$(tm_nft_chain_text "$chain")
+  [[ "$text" == *"comment \"${comment}\""* || "$text" == *"comment ${comment}"* ]]
+}
+
+tm_nft_ensure_table() {
+  if tm_run_quiet nft list table inet tunnel_manager >/dev/null 2>&1; then
+    return 0
+  fi
+  tm_must nft add table inet tunnel_manager
+}
+
+tm_nft_ensure_chain() {
+  local name="$1"
+  local def="$2"
+  if tm_run_quiet nft list chain inet tunnel_manager "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+  tm_must nft add chain inet tunnel_manager "$name" "$def"
+}
+
+tm_nft_ensure_base() {
+  TM_NFT_FILTER_OK=0
+  tm_nft_ensure_table || return 1
+  tm_nft_ensure_chain prerouting '{ type nat hook prerouting priority dstnat; policy accept; }' || return 1
+  tm_nft_ensure_chain postrouting '{ type nat hook postrouting priority srcnat; policy accept; }' || return 1
+  if tm_nft_filter_hook_allowed; then
+    tm_nft_ensure_chain forward '{ type filter hook forward priority 0; policy accept; }' || return 1
+    tm_nft_ensure_chain input '{ type filter hook input priority 0; policy accept; }' || return 1
+    TM_NFT_FILTER_OK=1
+  else
+    tm_warn "Another firewall owns a filter hook. Tunnel Manager will add NAT rules only."
+  fi
+}
+
+tm_nft_add_rule() {
+  local chain="$1"
+  local comment="$2"
+  shift 2
+  if tm_nft_comment_present "$chain" "$comment"; then
+    return 0
+  fi
+  tm_must nft add rule inet tunnel_manager "$chain" "$@" comment "$comment"
+}
+
+tm_nft_delete_comment() {
+  local chain="$1"
+  local comment="$2"
+  local text handle
+  text=$(tm_nft_chain_text "$chain")
+  while IFS= read -r handle; do
+    [[ -n "$handle" ]] || continue
+    tm_must nft delete rule inet tunnel_manager "$chain" handle "$handle" || return 1
+  done < <(tm_nft_handles_for_comment "$text" "$comment")
+}
+
+tm_nft_udp_apply_exec() {
+  local name="$1"
+  local iface="$2"
+  local lport="$3"
+  local dest_ip="$4"
+  local dest_port="$5"
+  local source_ip="$6"
+  local do_snat="$7"
+  local c_dnat c_snat c_fwd c_ret
+  c_dnat=$(tm_fw_comment "udp:${name}:dnat")
+  c_snat=$(tm_fw_comment "udp:${name}:snat")
+  c_fwd=$(tm_fw_comment "udp:${name}:fwd")
+  c_ret=$(tm_fw_comment "udp:${name}:fwdret")
+  tm_nft_ensure_base || return 1
+  tm_nft_add_rule prerouting "$c_dnat" iifname "$iface" udp dport "$lport" dnat to "${dest_ip}:${dest_port}" || return 1
+  if [[ "$do_snat" == "yes" ]]; then
+    tm_nft_add_rule postrouting "$c_snat" ip daddr "$dest_ip" udp dport "$dest_port" snat to "$source_ip" || return 1
+  fi
+  if [[ "${TM_NFT_FILTER_OK:-0}" == "1" ]]; then
+    tm_nft_add_rule forward "$c_fwd" udp dport "$dest_port" ip daddr "$dest_ip" accept || return 1
+    tm_nft_add_rule forward "$c_ret" udp sport "$dest_port" ip saddr "$dest_ip" accept || return 1
+  fi
+}
+
+tm_nft_udp_delete_exec() {
+  local name="$1"
+  tm_nft_delete_comment prerouting "$(tm_fw_comment "udp:${name}:dnat")" || return 1
+  tm_nft_delete_comment postrouting "$(tm_fw_comment "udp:${name}:snat")" || return 1
+  tm_nft_delete_comment forward "$(tm_fw_comment "udp:${name}:fwd")" || return 1
+  tm_nft_delete_comment forward "$(tm_fw_comment "udp:${name}:fwdret")" || return 1
+}
+
+tm_nft_input_apply_exec() {
+  local kind="$1"
+  local name="$2"
+  local iface="$3"
+  local port="${4:-}"
+  local comment
+  comment=$(tm_fw_comment "${kind}:${name}:input")
+  tm_nft_ensure_base || return 1
+  if [[ "${TM_NFT_FILTER_OK:-0}" != "1" ]]; then
+    tm_warn "Skipped ${kind} input allow because a filter hook is owned by another firewall."
+    return 0
+  fi
+  if [[ "$kind" == "gre" ]]; then
+    tm_nft_add_rule input "$comment" iifname "$iface" gre accept
+  else
+    tm_nft_add_rule input "$comment" iifname "$iface" udp dport "$port" accept
+  fi
+}
+
+tm_nft_input_delete_exec() {
+  local kind="$1"
+  local name="$2"
+  tm_nft_delete_comment input "$(tm_fw_comment "${kind}:${name}:input")"
+}
+
+tm_fw_udp_apply_exec() {
+  local backend
+  backend=$(tm_fw_active_backend) || return 1
+  case "$backend" in
+    iptables) tm_iptables_udp_apply_exec "$@" ;;
+    nft) tm_nft_udp_apply_exec "$@" ;;
+    *)
+      tm_error "Unsupported firewall backend: ${backend}"
+      return 1
+      ;;
+  esac
+}
+
+tm_fw_udp_delete_exec() {
+  local name="$1"
+  local backend
+  backend=$(tm_fw_active_backend) || return 1
+  case "$backend" in
+    iptables) tm_iptables_udp_delete_exec "$name" ;;
+    nft) tm_nft_udp_delete_exec "$name" ;;
+    *) return 1 ;;
+  esac
+}
+
+tm_fw_input_apply_exec() {
+  local backend
+  backend=$(tm_fw_active_backend) || return 1
+  case "$backend" in
+    iptables) tm_iptables_input_apply_exec "$@" ;;
+    nft) tm_nft_input_apply_exec "$@" ;;
+    *) return 1 ;;
+  esac
+}
+
+tm_fw_input_delete_exec() {
+  local kind="$1"
+  local name="$2"
+  local backend
+  backend=$(tm_fw_active_backend) || return 1
+  case "$backend" in
+    iptables) tm_iptables_input_delete_exec "$kind" "$name" ;;
+    nft) tm_nft_input_delete_exec "$kind" "$name" ;;
+    *) return 1 ;;
+  esac
+}
