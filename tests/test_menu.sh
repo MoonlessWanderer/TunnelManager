@@ -138,6 +138,16 @@ else
   tm_fail "manage did not label the tunnels"
 fi
 
+printf '%s\n' 'gre1 10.210.0.1/30' >>"${TM_FAKE_ROOT}/ip.addrs"
+menu_drive $'1\n1\n203.0.113.10\n203.0.113.40\n2\n10.210.0.2\n10.210.0.1\n\n\n\n\n\ny\n\n0\n0\n'
+if [[ "$MENU_STATUS" -eq 0 && -f "$(tm_tunnel_file edge4)" ]] \
+  && ! grep -q 'TM_LOCAL_TUNNEL_IP=10.210.' "$(tm_tunnel_file edge4)" \
+  && grep -q 'gre1 already uses 10.210.0.1/30. Press Enter for a free pair.' "$MENU_ERR"; then
+  tm_pass "a subnet that another tool uses is explained and Enter takes a free pair"
+else
+  tm_fail "the interface clash in the menu was not handled (status ${MENU_STATUS}): $(tail -n 5 "$MENU_ERR")"
+fi
+
 menu_reset
 menu_drive $'1\n2\nsudo tunnel-manager quick v2:gre:edge:203.0.113.10:203.0.113.20:10.200.0.1:10.200.0.2:30:180879360\ny\n\n0\n0\n'
 if [[ "$MENU_STATUS" -eq 0 && -f "$(tm_tunnel_file edge)" && -f "${TM_FAKE_ROOT}/systemctl.enabled" ]] \

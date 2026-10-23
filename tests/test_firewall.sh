@@ -111,6 +111,24 @@ else
   tm_pass "host /32 rules were removed"
 fi
 
+{
+  printf '%s\n' "CHAIN filter TM_INPUT"
+  printf 'RULE\tfilter\tTM_INPUT\t%s\n' \
+    '-i eth0 -p gre -m comment --comment "tm:gre:old:input" -j ACCEPT'
+} >>"${TM_FAKE_ROOT}/iptables.state"
+tm_expect_ok "gre input allow over a rule without a peer" tm_fw_input_apply_exec old eth0 203.0.113.20 4
+tm_expect_eq "the rule without a peer is replaced, not kept beside the new one" \
+  "$(grep -c 'tm:gre:old:input' "${TM_FAKE_ROOT}/iptables.state" || true)" "1"
+if grep -q -- '-i eth0 -s 203.0.113.20 -p gre -m comment --comment tm:gre:old:input' "${TM_FAKE_ROOT}/iptables.state"; then
+  tm_pass "the remaining gre input allow accepts the peer only"
+else
+  tm_fail "the peer-limited gre input allow is missing"
+fi
+tm_expect_ok "gre input allow again" tm_fw_input_apply_exec old eth0 203.0.113.20 4
+tm_expect_eq "an up-to-date gre input allow is left alone" \
+  "$(grep -c -- '-D TM_INPUT' "${TM_FAKE_ROOT}/iptables.log" || true)" "1"
+tm_expect_ok "remove that gre input allow" tm_fw_input_delete_exec old 4
+
 TM_BIN_OVERRIDE[nft]="${TM_REPO}/tests/fakes/nft"
 unset 'TM_BIN_OVERRIDE[iptables]'
 rm -f -- "${TM_FAKE_ROOT}/nft.log" "${TM_FAKE_ROOT}/nft.state" "${TM_FAKE_ROOT}/nft.handle"
@@ -132,12 +150,35 @@ if grep -q "add rule inet tunnel_manager input iifname eth0 ip saddr 203.0.113.2
 else
   tm_fail "nft gre input allow was not installed"
 fi
+tm_expect_ok "nft gre input allow again" tm_fw_input_apply_exec edge eth0 203.0.113.20 4
+tm_expect_eq "nft keeps one up-to-date gre input allow" \
+  "$(grep -c 'tm:gre:edge:input' "${TM_FAKE_ROOT}/nft.state" || true)" "1"
 tm_expect_ok "nft gre input delete" tm_fw_input_delete_exec edge 4
 if grep -q "tm:gre:edge:input" "${TM_FAKE_ROOT}/nft.state"; then
   tm_fail "nft gre input allow was left behind"
 else
   tm_pass "nft gre input allow was removed"
 fi
+"${TM_REPO}/tests/fakes/nft" add rule inet tunnel_manager input iifname eth0 meta l4proto gre accept comment tm:gre:old:input
+tm_expect_ok "nft gre input allow over a rule without a peer" tm_fw_input_apply_exec old eth0 203.0.113.20 4
+if [[ "$(grep -c 'tm:gre:old:input' "${TM_FAKE_ROOT}/nft.state" || true)" == "1" ]] \
+  && grep -q 'ip saddr 203.0.113.20 meta l4proto gre accept comment tm:gre:old:input' "${TM_FAKE_ROOT}/nft.state"; then
+  tm_pass "nft replaces a gre input allow without a peer"
+else
+  tm_fail "nft kept a gre input allow without a peer"
+fi
+tm_expect_ok "nft remove that gre input allow" tm_fw_input_delete_exec old 4
+"${TM_REPO}/tests/fakes/nft" add rule inet tunnel_manager input iifname eth0 ip6 saddr 2001:db8::20 meta l4proto gre accept comment tm:gre:six:input
+: >"${TM_FAKE_ROOT}/nft.log"
+tm_expect_ok "nft gre input allow with the peer written another way" \
+  tm_fw_input_apply_exec six eth0 2001:DB8:0::20 6
+if [[ "$(grep -c 'tm:gre:six:input' "${TM_FAKE_ROOT}/nft.state" || true)" == "1" ]] \
+  && ! grep -q 'delete rule' "${TM_FAKE_ROOT}/nft.log"; then
+  tm_pass "nft keeps a gre input allow whose peer only differs in notation"
+else
+  tm_fail "nft replaced a gre input allow for the same peer"
+fi
+tm_expect_ok "nft remove the IPv6 gre input allow" tm_fw_input_delete_exec six 6
 printf '%s\n' "table inet filter {" >"${TM_FAKE_ROOT}/nft.foreign"
 printf '%s\n' "  chain input { type filter hook input priority 0; policy drop; }" >>"${TM_FAKE_ROOT}/nft.foreign"
 printf '%s\n' "}" >>"${TM_FAKE_ROOT}/nft.foreign"

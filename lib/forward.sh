@@ -283,6 +283,7 @@ tm_forward_port_user() {
   fi
   while IFS= read -r line; do
     IFS=$' \t\n' read -r -a cols <<<"$line"
+    [[ "${cols[0]:-}" != "State" && "${cols[0]:-}" != "Netid" ]] || continue
     local_addr="${cols[3]:-}"
     case "$local_addr" in
       ""|127.*|"[::1]"*|*%lo:*) continue ;;

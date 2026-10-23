@@ -404,14 +404,21 @@ tm_iptables_l4_delete_exec() {
   tm_iptables_gc || return 1
 }
 
+# A rule for this tunnel with another interface or peer is replaced, not kept
+# next to the new one.
 tm_iptables_input_apply_exec() {
   local name="$1"
   local iface="$2"
   local remote="$3"
+  local comment
+  local -a spec=()
+  comment=$(tm_fw_comment "gre:${name}:input")
+  spec=(-i "$iface" -s "$remote" -p gre -m comment --comment "$comment" -j ACCEPT)
   tm_iptables_ensure_base || return 1
-  tm_iptables_add_if_missing \
-    iptables -t filter -A TM_INPUT -i "$iface" -s "$remote" -p gre \
-    -m comment --comment "$(tm_fw_comment "gre:${name}:input")" -j ACCEPT
+  if ! tm_run_quiet iptables -t filter -C TM_INPUT "${spec[@]}" >/dev/null 2>&1; then
+    tm_iptables_delete_comment filter TM_INPUT "$comment" || return 1
+  fi
+  tm_iptables_add_if_missing iptables -t filter -A TM_INPUT "${spec[@]}"
 }
 
 tm_iptables_input_delete_exec() {
@@ -536,7 +543,7 @@ tm_nft_input_apply_exec() {
   local name="$1"
   local iface="$2"
   local remote="$3"
-  local match=ip
+  local match=ip comment line stale=0 want have
   tm_nft_ensure_base || return 1
   if [[ "${TM_NFT_FILTER_OK:-0}" != "1" ]]; then
     tm_warn "Skipped the GRE input allow because a filter hook is owned by another firewall."
@@ -545,7 +552,24 @@ tm_nft_input_apply_exec() {
   if tm_valid_ipv6 "$remote"; then
     match=ip6
   fi
-  tm_nft_add_rule input "$(tm_fw_comment "gre:${name}:input")" \
+  comment=$(tm_fw_comment "gre:${name}:input")
+  want=$(tm_ip_canonical "$remote") || return 1
+  while IFS= read -r line; do
+    [[ "$line" == *"comment \"${comment}\""* || "$line" == *"comment ${comment} "* || "$line" == *"comment ${comment}" ]] || continue
+    have=""
+    if [[ "$line" =~ saddr[[:space:]]+([0-9A-Fa-f:.]+) ]]; then
+      have=$(tm_ip_canonical "${BASH_REMATCH[1]}" || true)
+    fi
+    if [[ "$have" == "$want" \
+      && ("$line" == *"iifname \"${iface}\" "* || "$line" == *"iifname ${iface} "*) ]]; then
+      continue
+    fi
+    stale=1
+  done < <(tm_nft_chain_text input)
+  if [[ "$stale" == "1" ]]; then
+    tm_nft_delete_comment input "$comment" || return 1
+  fi
+  tm_nft_add_rule input "$comment" \
     iifname "$iface" "$match" saddr "$remote" meta l4proto gre accept
 }
 
@@ -634,10 +658,15 @@ tm_ip6tables_input_apply_exec() {
   local name="$1"
   local iface="$2"
   local remote="$3"
+  local comment
+  local -a spec=()
+  comment=$(tm_fw_comment "gre:${name}:input")
+  spec=(-i "$iface" -s "$remote" -p gre -m comment --comment "$comment" -j ACCEPT)
   tm_ip6tables_input_ensure || return 1
-  tm_iptables_add_if_missing \
-    ip6tables -t filter -A TM_INPUT -i "$iface" -s "$remote" -p gre \
-    -m comment --comment "$(tm_fw_comment "gre:${name}:input")" -j ACCEPT
+  if ! tm_run_quiet ip6tables -t filter -C TM_INPUT "${spec[@]}" >/dev/null 2>&1; then
+    tm_ip6tables_input_delete_comment "$comment" || return 1
+  fi
+  tm_iptables_add_if_missing ip6tables -t filter -A TM_INPUT "${spec[@]}"
 }
 
 tm_ip6tables_input_delete_exec() {

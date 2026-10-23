@@ -397,14 +397,16 @@ tm_menu_setup_iran() {
         continue
       fi
       if other=$(tm_tunnel_inner_owner "$local_tun" "$cidr"); then
-        tm_warn "Tunnel ${other} already uses this subnet. Choose other inner addresses."
-        continue
+        tm_warn "Tunnel ${other} already uses this subnet. Press Enter for a free pair."
+      elif other=$(tm_tunnel_host_owner "$local_tun" "$cidr"); then
+        tm_warn "${other%% *} already uses ${other#* }. Press Enter for a free pair."
+      else
+        break
       fi
-      if other=$(tm_tunnel_host_owner "$local_tun" "$cidr"); then
-        tm_warn "${other%% *} already uses ${other#* }. Choose other inner addresses."
-        continue
+      if suggested=$(tm_setup_suggest_inner "$local_pub" "$remote_pub"); then
+        IFS=$' \t\n' read -r local_tun remote_tun <<<"$suggested"
+        cidr="30"
       fi
-      break
     done
   else
     local_tun="$local_pub"
