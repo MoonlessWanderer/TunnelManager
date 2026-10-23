@@ -4,51 +4,57 @@
 
 ```bash
 sudo install.sh
-sudo tunnel-manager init --role iran --public-ip 203.0.113.10 --wan-iface eth0 --ssh-port 22
-sudo tunnel-manager tunnel create --name edge --type wireguard \
-  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
-  --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
-  --cidr 30 --listen-port 51820 --wan-iface eth0
-sudo tunnel-manager tunnel export-peer --name edge --output /root/iran.peer
+sudo tm
 ```
 
-The create above has no peer key yet, so the tunnel stays down. Copy
-`/root/iran.peer` to the foreign server. It contains the public key only.
+Choose Configure a New Tunnel, then Iran. The detected address is the default;
+press Enter to keep it. Enter the foreign server's IPv4 address, then choose
+plain port forward or GRE.
+
+For GRE, the inner defaults are `10.200.0.1` on Iran and `10.200.0.2` on the
+foreign server, prefix 30. Press Enter to accept a default. Then enter TCP
+ports, one per line:
+
+```text
+443
+443=2053
+```
+
+The first form listens on 443 and sends to 443. The second listens on 443 and
+sends to 2053. An empty line finishes the list. For GRE, an empty list means
+the tunnel only, with no port forward. A plain port forward needs at least
+one port.
+
+The menu prints one command. Run that command on the foreign server. It looks
+like:
+
+```bash
+sudo tunnel-manager quick v1:gre:edge:203.0.113.10:203.0.113.20:10.200.0.1:10.200.0.2:30
+```
+
+A plain port forward does not need a tunnel on the foreign server. The service
+there must already listen on the destination port.
 
 ## Second server
 
-```bash
-sudo install.sh
-sudo tunnel-manager init --role foreign --public-ip 203.0.113.20 --wan-iface eth0
-sudo tunnel-manager tunnel create --name edge --type wireguard \
-  --local-public-ip 203.0.113.20 --remote-public-ip 203.0.113.10 \
-  --local-tunnel-ip 10.200.0.2 --remote-tunnel-ip 10.200.0.1 \
-  --wan-iface eth0 --peer-file /root/iran.peer
-sudo tunnel-manager tunnel export-peer --name edge --output /root/foreign.peer
-```
+Install Tunnel Manager, run `sudo tm`, choose Foreign, and paste the command
+from Iran. The same command works without the menu.
 
-## Finish the first server
-
-```bash
-sudo tunnel-manager tunnel set-peer --name edge --peer-file /root/foreign.peer
-sudo tunnel-manager tunnel test --name edge
-```
-
-`tunnel test` checks that the interface exists and pings the peer tunnel
+`tunnel test` checks that a GRE interface exists and pings the peer tunnel
 address. IPv6 peers are probed with `ping -6`. A ping failure is reported as
-a test result. It does not roll back the tunnel, because the peer may not be
-ready yet.
+a test result. It does not roll back the tunnel. A plain port forward has no
+interface to test.
 
-An IPv6 tunnel uses the same commands. IPv4 inner prefixes are 24-31 and IPv6
-inner prefixes are 64-127. Leave `--cidr` unset to get 30 or 64 from the
-address family. Port forwarding is IPv4 for both TCP and UDP.
+An IPv6 GRE tunnel can still be created from the command line. IPv4 inner
+prefixes are 24-31 and IPv6 inner prefixes are 64-127. Leave `--cidr` unset
+to get 30 or 64 from the address family. Port forwarding is IPv4 for both
+TCP and UDP. The menu setup command is IPv4 only.
 
 ```bash
-sudo tm
-sudo tunnel-manager tunnel create --name edge6 --type wireguard \
+sudo tunnel-manager tunnel create --name gre6 --type gre \
   --local-public-ip 2001:db8::10 --remote-public-ip 2001:db8::20 \
   --local-tunnel-ip 2001:db8:1::1 --remote-tunnel-ip 2001:db8:1::2 \
-  --wan-iface eth0 --peer-public-key 'PEER_PUBLIC_KEY'
+  --wan-iface eth0 --i-understand-no-encryption
 ```
 
 Update the installed program from the menu or with:
@@ -143,21 +149,18 @@ transit.
 `sudo tm` opens the menu.
 
 1. Configure a New Tunnel
-   - Quick WireGuard setup asks which side this server is and the two reachable
-     addresses. It uses tunnel name `edge`, inner addresses `10.200.0.1` and
-     `10.200.0.2`, and listen port 51820. This server's reachable address and
-     WAN interface are taken from the default route, or from the only network
-     interface when that route is hidden. Enter accepts a shown default. An
-     empty address or interface is asked again.
-   - Advanced tunnel asks for every address.
+   - Choose Iran or foreign.
+   - Iran detects its address, asks for the foreign address, then plain port
+     forward or GRE. Enter accepts a shown default. An empty port line
+     finishes the list.
+   - Foreign asks for the setup command printed by Iran.
 2. Manage Tunnels
-   - Show the public key, paste the other server's key, or forward a port.
-     Press Enter on the forward prompts to publish TCP 443 through `edge`.
-   - Test, restart, and delete a tunnel.
-   - Port forwards has add, edit, delete, list, and test.
+   - Lists saved tunnels. If none are saved, it says so.
+   - Choosing a tunnel offers details, test, TCP ports, and delete. GRE also
+     offers restart.
    - Maintenance has status, troubleshoot, backup, restore, apply, dry-run, and rollback.
 3. Update reinstalls the program and keeps saved tunnels.
-4. Uninstall asks once, then removes the program, saved tunnels, keys, logs, and `/etc/wireguard/tm-*.conf`. Missing paths are ignored. Other firewall rules are not flushed.
+4. Uninstall asks once, then removes the program, saved tunnels, logs, and leftover `/etc/wireguard/tm-*.conf` files. Missing paths are ignored. Other firewall rules are not flushed.
 5. Enable BBR. The plan sets `net.core.default_qdisc=fq` and
    `net.ipv4.tcp_congestion_control=bbr`. It does not change the default route.
 

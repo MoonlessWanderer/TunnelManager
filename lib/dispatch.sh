@@ -145,6 +145,9 @@ tm_main() {
     rollback)
       tm_action_rollback "$@"
       ;;
+    quick)
+      tm_action_quick "$@"
+      ;;
     tunnel)
       tm_dispatch_tunnel "$@"
       ;;

@@ -1,4 +1,4 @@
-# GRE has no encryption and no authentication. Prefer WireGuard.
+# GRE has no encryption and no authentication.
 TM_TUNNEL_NAME=gre1
 TM_TUNNEL_TYPE=gre
 TM_TUNNEL_STATE=active

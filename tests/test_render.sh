@@ -4,21 +4,6 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 tm_test_reset
 
-rendered=$(tm_wg_render "$TM_TEST_PRIV" 10.200.0.1 30 51820 1420 "$TM_TEST_PUB" 10.200.0.2 203.0.113.20 51820 25)
-if [[ "$rendered" == *"Table = off"* && "$rendered" == *"AllowedIPs = 10.200.0.2/32"* && "$rendered" != *"0.0.0.0/0"* && "$rendered" != *"::/0"* ]]; then
-  tm_pass "wireguard config keeps a host route only"
-else
-  tm_fail "wireguard config was not constrained"
-fi
-tm_expect_fail "wireguard rejects a default allowed ip" tm_wg_render "$TM_TEST_PRIV" 10.200.0.1 30 51820 1420 "$TM_TEST_PUB" 0.0.0.0 203.0.113.20 51820 25
-rendered6=$(tm_wg_render "$TM_TEST_PRIV" 2001:db8:1::1 64 51820 1400 "$TM_TEST_PUB" 2001:db8:1::2 2001:db8::20 51820 25)
-if [[ "$rendered6" == *"AllowedIPs = 2001:db8:1::2/128"* && "$rendered6" == *"Endpoint = [2001:db8::20]:51820"* && "$rendered6" == *"Table = off"* && "$rendered6" != *"::/0"* ]]; then
-  tm_pass "ipv6 wireguard config keeps a host route only"
-else
-  tm_fail "ipv6 wireguard config was not constrained"
-fi
-tm_expect_fail "wireguard rejects an ipv6 default route" tm_wg_render "$TM_TEST_PRIV" 2001:db8:1::1 64 51820 1400 "$TM_TEST_PUB" :: 2001:db8::20 51820 25
-
 warning=$(tm_gre_warning_text)
 if [[ "$warning" == *"no encryption"* && "$warning" == *"no authentication"* ]]; then
   tm_pass "GRE warning states there is no encryption"

@@ -9,20 +9,17 @@ execution.
 
 `init` stores `iran` or `foreign`, the reachable public address, the WAN
 interface, the SSH port, and the firewall backend pin (`auto`, `iptables`, or
-`nft`). The same command set runs on both servers. Addresses and peer keys
-are different; the code is not.
+`nft`). The same command set runs on both servers. Addresses are different;
+the code is not.
 
 ## Tunnels
 
 A tunnel name matches `^[a-z][a-z0-9-]{0,11}$`. The interface is `tm-<name>`
 and stays within the 15-character interface limit.
 
-WireGuard configuration is written to `/etc/wireguard/tm-<name>.conf` with
-`Table = off` and `AllowedIPs` set to the peer host only (`/32` or `/128`).
-The private key is stored at `/etc/tunnel-manager/keys/<name>.key`. A missing
-peer public key leaves the tunnel in `pending-peer` and does not start it.
-IPv6 endpoints are written as `[address]:port`. The outer and inner families
-may differ. The two addresses of each pair must use one family.
+A `forward` tunnel stores the two public addresses and does not create an
+interface. Its port forwards DNAT to the foreign address and SNAT back to the
+local public address. No route is added.
 
 GRE uses `ip link add type gre` for IPv4 endpoints and `type ip6gre` for IPv6
 endpoints. The inner address is IPv4 `/24` through `/31`, or IPv6 `/64`
@@ -96,7 +93,8 @@ does not appear in the plan.
 ## Backups
 
 Archives contain an allowlisted set of members: `MANIFEST`, `host.conf`,
-`haproxy.cfg`, `tunnels/*.conf`, and `forwards/*.conf`. Keys and
-`wireguard/tm-*.conf` are included only with `--include-keys`. Restore
-checks every member, copies the files, and does not apply them. The operator
-runs `apply` after review.
+`haproxy.cfg`, `tunnels/*.conf`, and `forwards/*.conf`. Key files, and
+`wireguard/tm-*.conf` from an older archive, are accepted only with
+`--include-keys`. Restore checks every member, copies the files, and does
+not apply them. The operator runs `apply` after review. New backups do not
+write WireGuard configs.

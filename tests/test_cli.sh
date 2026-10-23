@@ -6,7 +6,7 @@ tm_test_reset
 
 bin="${TM_REPO}/bin/tunnel-manager"
 version=$(bash "$bin" version)
-tm_expect_eq "version" "$version" "1.4.4"
+tm_expect_eq "version" "$version" "1.5.0"
 bash "$bin" help >/dev/null
 tm_pass "help exits successfully"
 
@@ -29,7 +29,7 @@ else
   tm_fail "init dry-run wrote host.conf"
 fi
 
-text=$(env "${child_env[@]}" bash "$bin" --dry-run tunnel create --name edge --type wireguard \
+text=$(env "${child_env[@]}" bash "$bin" --dry-run tunnel create --name edge --type gre \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
   --wan-iface eth0 2>&1 || true)

@@ -1,9 +1,10 @@
 # Tunnel Manager
 
 Tunnel Manager is a modular Bash tool for a pair of Debian or Ubuntu servers.
-One server is the Iran role and the other is the foreign role. It builds a
-WireGuard or kernel GRE tunnel between them, and forwards TCP and UDP with
-one firewall path: DNAT, optional SNAT, and forward rules.
+One server is the Iran role and the other is the foreign role. It forwards
+TCP ports from Iran to the foreign server, or builds a kernel GRE tunnel
+between them. TCP and UDP forwards use one firewall path: DNAT, optional
+SNAT, and forward rules.
 
 The tool does not flush firewall tables, does not replace unrelated firewall
 rules, and does not change the default route.
@@ -13,11 +14,9 @@ rules, and does not change the default route.
 - Debian or Ubuntu
 - Bash 4.4 or newer
 - root for apply, restore, and service installation
-- Packages: `wireguard`, `iproute2`, `iptables`, `nftables`,
-  `iputils-ping`, `procps`
+- Packages: `iproute2`, `iptables`, `nftables`, `iputils-ping`, `procps`
 
-WireGuard is the recommended tunnel. GRE has no encryption and no
-authentication. Creating a GRE tunnel requires
+GRE has no encryption and no authentication. Creating a GRE tunnel requires
 `--i-understand-no-encryption` or typing `GRE is not encrypted`. `--yes` does
 not skip that confirmation.
 
@@ -59,43 +58,41 @@ Useful installer flags:
 - `--yes` is accepted and does not change network state by itself
 
 `uninstall.sh` stops Tunnel Manager through its own `down` command and removes
-its files. It does not remove the `wireguard` or `haproxy` packages. The menu
-uninstall, and `--purge-state`, also remove saved tunnels, keys, logs, the
-Tunnel Manager sysctl files, and `/etc/wireguard/tm-*.conf`. Missing paths are
-ignored. Other WireGuard configs stay in place.
+its files. It does not remove `haproxy`. The menu uninstall, and
+`--purge-state`, also remove saved tunnels, logs, the Tunnel Manager sysctl
+files, and leftover `/etc/wireguard/tm-*.conf` files from older installs.
+Missing paths are ignored. Other WireGuard configs stay in place.
 
 ## Typical flow
 
 ```bash
-sudo tunnel-manager tunnel keygen --name edge
-sudo tunnel-manager tunnel export-peer --name edge --output /root/edge.peer
-# copy the public bundle to the other server, then:
-sudo tunnel-manager tunnel create --name edge --type wireguard \
-  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
-  --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
-  --wan-iface eth0 --peer-file /root/edge.peer
-sudo tunnel-manager forward add --name web --proto tcp --listen-port 443 \
-  --dest-ip 10.200.0.2 --source-ip 10.200.0.1 --ingress-iface eth0
-sudo tunnel-manager forward add --name dns --proto udp --listen-port 5300 \
-  --dest-ip 10.200.0.2 --dest-port 53 --source-ip 10.200.0.1 --ingress-iface eth0
-sudo tunnel-manager tunnel test --name edge
-sudo tunnel-manager doctor
+sudo tm
 ```
 
-Run `sudo tm` to open the menu.
+On the Iran server, choose Configure a New Tunnel, then Iran. The menu fills
+this server's address. Enter the foreign address, choose plain port forward
+or GRE, and press Enter to accept a shown default. Port lines look like `443`
+or `443=2053`. An empty line finishes the list. A GRE tunnel with no ports
+is a tunnel only. Iran then prints one command for the foreign server.
 
-1. Configure a New Tunnel. Quick setup fills the tunnel name, inner addresses, listen port, and WAN interface.
-2. Manage Tunnels. Show or paste the public key, forward a port, and reach status, backup, apply, and rollback.
+On the foreign server, choose Foreign and paste that command. A plain port
+forward does not create a tunnel there.
+
+```bash
+sudo tunnel-manager quick v1:gre:edge:203.0.113.10:203.0.113.20:10.200.0.1:10.200.0.2:30
+```
+
+1. Configure a New Tunnel. Iran or foreign, then the setup above.
+2. Manage Tunnels. Lists saved tunnels. If none are saved, it says so. Choosing one tunnel shows only that tunnel's actions.
 3. Update downloads the main branch and reinstalls the program. Saved tunnels stay in place and services are not enabled.
 4. Uninstall asks once, then removes the program and everything it saved. Missing files are skipped. Other firewall rules stay in place.
 5. Enable BBR sets `fq` and `bbr` only. It does not change the default route.
 
 `tunnel-manager --dry-run apply` prints the plan and does not change the system.
 
-IPv6 tunnel addresses use prefix 64-127. An IPv6 public endpoint uses
-`ip6gre` for GRE and `ip6tables` only when the iptables backend is selected.
-WireGuard `AllowedIPs` stays a single host: `/32` or `/128`. Port forwarding
-is IPv4 for both TCP and UDP.
+IPv6 GRE addresses use prefix 64-127. An IPv6 public endpoint uses `ip6gre`
+and `ip6tables` only when the iptables backend is selected. The menu setup
+command is IPv4. Port forwarding is IPv4 for both TCP and UDP.
 
 ## Safety
 
@@ -109,9 +106,8 @@ is IPv4 for both TCP and UDP.
 - Rules go into `TM_*` chains or the `inet tunnel_manager` table. Jumps are
   inserted at position 1 and return when they do not match, so SSH and other
   existing rules still run. Tables are never flushed.
-- WireGuard uses `Table = off` and a peer `/32`. `0.0.0.0/0` and `::/0` are
-  rejected. Assigning a tunnel address creates a connected route for that
-  prefix only. That is not a default-route change.
+- `0.0.0.0/0` and `::/0` are rejected. Assigning a GRE address creates a
+  connected route for that prefix only. That is not a default-route change.
 - Port forwarding may set `net.ipv4.ip_forward=1` and
   `net.ipv4.conf.<tunnel>.rp_filter=2`. A foreign sysctl drop-in is not
   overwritten. `rp_filter` is not changed for `all` or `default`.
@@ -119,8 +115,8 @@ is IPv4 for both TCP and UDP.
   `/etc/haproxy/haproxy.cfg` is not modified. A leftover Tunnel Manager
   HAProxy process is stopped by `apply` and `down`.
 - Listen ports and DNAT ports that match the SSH port are refused.
-- Private keys are mode `0600`. Logs redact WireGuard key material. Backups
-  omit keys unless `--include-keys` is passed, and that option prints a warning.
+- Logs still redact key-shaped strings. Backups omit key files unless
+  `--include-keys` is passed, and that option prints a warning.
 - State files are strict `KEY=value` records. They are never sourced.
 
 ## Layout

@@ -319,7 +319,7 @@ tm_kv_read() {
     [[ -z "$line" ]] && continue
     [[ "$line" =~ ^[[:space:]]*# ]] && continue
     [[ "$line" != *"="* ]] && return 1
-    # Values may contain '=' because WireGuard keys are padded base64.
+    # Values may contain '='.
     [[ "$line" =~ ^[A-Z0-9_]+=.+$ ]] || return 1
     key=${line%%=*}
     value=${line#*=}
@@ -376,6 +376,10 @@ tm_host_file() {
 
 tm_tunnel_file() {
   printf '%s\n' "${TM_ETC}/tunnels/${1}.conf"
+}
+
+tm_tunnel_iface() {
+  printf 'tm-%s\n' "$1"
 }
 
 tm_forward_file() {

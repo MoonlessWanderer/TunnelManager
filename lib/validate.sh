@@ -131,7 +131,7 @@ tm_valid_fw_backend() {
 
 tm_valid_tunnel_type() {
   case "$1" in
-    wireguard|gre) return 0 ;;
+    forward|gre) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -161,7 +161,7 @@ tm_normalize_wg_key() {
   key=${key//$'\r'/}
   key=${key//$'\n'/}
   if [[ "$key" == *"[REDACTED-KEY]"* || "$key" == *REDACTED-KEY* ]]; then
-    tm_error "That text is a log placeholder, not the key. On the other server run sudo tm, open Manage Tunnels, and choose Show public key. Copy the line that ends with =."
+    tm_error "That text is a log placeholder, not a key."
     return 1
   fi
   if [[ "$key" =~ ([A-Za-z0-9+/]{43}=) ]]; then

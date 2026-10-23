@@ -9,12 +9,9 @@ mkdir -p -- "$ROOT"
 touch "$LINKS" "$ADDRS"
 printf '%s\n' "$*" >>"$LOG"
 
-if [[ "${1:-}" == "-4" || "${1:-}" == "-6" ]]; then
+while [[ "${1:-}" == "-4" || "${1:-}" == "-6" || "${1:-}" == "-o" ]]; do
   shift
-fi
-if [[ "${1:-}" == "-o" ]]; then
-  shift
-fi
+done
 
 case "${1:-}" in
   route)
@@ -55,6 +52,13 @@ case "${1:-}" in
           fi
           prev="$arg"
         done
+        if [[ -z "$name" ]]; then
+          while read -r link; do
+            [[ -n "${link:-}" ]] || continue
+            printf '2: %s: <UP> mtu 1500\n' "$link"
+          done <"$LINKS"
+          exit 0
+        fi
         if grep -q "^${name}$" "$LINKS"; then
           printf '2: %s: <UP> mtu 1420\n' "$name"
           exit 0
@@ -91,6 +95,13 @@ case "${1:-}" in
           fi
           prev="$arg"
         done
+        if [[ -z "$name" ]]; then
+          while read -r iface addr; do
+            [[ -n "${iface:-}" && -n "${addr:-}" ]] || continue
+            printf '2: %s inet %s scope global\n' "$iface" "$addr"
+          done <"$ADDRS"
+          exit 0
+        fi
         grep "^${name} " "$ADDRS" || true
         exit 0
         ;;

@@ -17,7 +17,6 @@ tm_gre_warning_text() {
   cat <<'EOF'
 WARNING: GRE tunnels have no encryption and no authentication.
 Traffic can be read and modified in transit.
-WireGuard is the recommended tunnel type.
 The default route will not be changed.
 EOF
 }

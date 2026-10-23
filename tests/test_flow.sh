@@ -9,38 +9,23 @@ TM_FW_BACKEND=iptables
 unset 'TM_BIN_OVERRIDE[nft]'
 unset 'TM_BIN_OVERRIDE[systemctl]'
 
-tm_expect_ok "create wireguard tunnel" \
-  tm_action_tunnel_create --name edge --type wireguard \
+tm_expect_fail "wireguard type is rejected" \
+  tm_action_tunnel_create --name old --type wireguard \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
-  --wan-iface eth0 --peer-public-key "$TM_TEST_PUB" --yes
+  --wan-iface eth0 --yes
+
+tm_expect_ok "create gre tunnel" \
+  tm_action_tunnel_create --name edge --type gre \
+  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
+  --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
+  --wan-iface eth0 --i-understand-no-encryption --yes
 
 if grep -q '^tm-edge$' "${TM_FAKE_ROOT}/ip.links"; then
-  tm_pass "wireguard interface was created"
+  tm_pass "gre interface was created"
 else
-  tm_fail "wireguard interface was not created"
+  tm_fail "gre interface was not created"
 fi
-
-TM_BIN_OVERRIDE[systemctl]="${TM_REPO}/tests/fakes/systemctl"
-printf '%s\n' \
-  "[Interface]" \
-  "PrivateKey = ${TM_TEST_PRIV}" \
-  "Address = 10.200.0.1/30" \
-  "ListenPort = 51820" \
-  "Table = off" \
-  "" \
-  "[Peer]" \
-  "PublicKey = ${TM_TEST_PUB}" \
-  "AllowedIPs = 10.200.0.2/32" \
-  >"${TM_WG_DIR}/tm-gone.conf"
-tm_expect_fail "wireguard start fails when the interface stays down" tm_wg_up_exec gone
-if grep -q 'did not come up' "$TM_LOG_FILE"; then
-  tm_pass "missing wireguard interface is reported"
-else
-  tm_fail "missing wireguard interface was not reported"
-fi
-unset 'TM_BIN_OVERRIDE[systemctl]'
-rm -f -- "${TM_WG_DIR}/tm-gone.conf"
 
 tm_expect_fail "rp_filter is not written for a missing interface" tm_rp_filter_apply_exec tm-missing
 if grep -q 'tm-missing' "${TM_FAKE_ROOT}/sysctl.log" 2>/dev/null; then
@@ -48,28 +33,11 @@ if grep -q 'tm-missing' "${TM_FAKE_ROOT}/sysctl.log" 2>/dev/null; then
 else
   tm_pass "sysctl did not run for a missing interface"
 fi
-conf="${TM_WG_DIR}/tm-edge.conf"
-tm_expect_ok "generated wireguard config is safe" tm_wg_assert_conf_safe "$conf"
-if grep -q "$TM_TEST_PRIV" "$TM_LOG_FILE"; then
-  tm_fail "private key was written to the log"
-else
-  tm_pass "private key is absent from the log"
-fi
-mode=$(stat -c '%a' "$(tm_key_file edge)" 2>/dev/null || stat -f '%OLp' "$(tm_key_file edge)")
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*)
-    printf 'SKIP private key mode 0600 is not observable on %s (stat reported %s).\n' "$(uname -s)" "$mode"
-    ;;
-  *)
-    tm_expect_eq "private key mode is 0600" "$mode" "600"
-    ;;
-esac
-
 tm_expect_fail "duplicate tunnel is rejected" \
-  tm_action_tunnel_create --name edge --type wireguard \
+  tm_action_tunnel_create --name edge --type gre \
   --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
   --local-tunnel-ip 10.200.0.1 --remote-tunnel-ip 10.200.0.2 \
-  --wan-iface eth0 --peer-public-key "$TM_TEST_PUB" --yes
+  --wan-iface eth0 --i-understand-no-encryption --yes
 
 tm_expect_fail "SSH listen port is rejected" \
   tm_action_forward_add --name bad --proto tcp --listen-port 22 \
@@ -119,10 +87,10 @@ tm_expect_eq "existing tunnel stays up after rollback" "$links_before" "$links_a
 
 out="${TM_VAR}/peer-edge.conf"
 tm_expect_ok "export peer bundle" tm_action_tunnel_export --name edge --output "$out" --yes
-if grep -q "TM_PEER_PUBLIC_KEY=${TM_TEST_PUB}" "$out" && ! grep -q "$TM_TEST_PRIV" "$out"; then
-  tm_pass "peer export contains only the public key"
+if grep -q "TM_PEER_PUBLIC_IP=203.0.113.10" "$out" && ! grep -q "$TM_TEST_PRIV" "$out"; then
+  tm_pass "peer export contains the public address and no private key"
 else
-  tm_fail "peer export leaked or omitted a key"
+  tm_fail "peer export was incomplete"
 fi
 
 text=$(TM_DRY_RUN=1 tm_action_tunnel_create --name gre1 --type gre \
@@ -140,26 +108,6 @@ else
   tm_fail "GRE dry-run wrote state"
 fi
 
-tm_expect_ok "create ipv6 wireguard tunnel" \
-  tm_action_tunnel_create --name edge6 --type wireguard \
-  --local-public-ip 2001:db8::10 --remote-public-ip 2001:db8::20 \
-  --local-tunnel-ip 2001:db8:1::1 --remote-tunnel-ip 2001:db8:1::2 \
-  --wan-iface eth0 --peer-public-key "$TM_TEST_PUB" --yes
-conf6="${TM_WG_DIR}/tm-edge6.conf"
-if grep -q 'AllowedIPs = 2001:db8:1::2/128' "$conf6" \
-  && grep -q 'Endpoint = \[2001:db8::20\]:51820' "$conf6" \
-  && grep -q 'Table = off' "$conf6" \
-  && ! grep -q '::/0' "$conf6"; then
-  tm_pass "ipv6 wireguard config is a host route"
-else
-  tm_fail "ipv6 wireguard config was not constrained"
-fi
-if [[ -f "${TM_FAKE_ROOT}/ip6tables.log" ]] && grep -q -- '--dport 51820' "${TM_FAKE_ROOT}/ip6tables.log" \
-  && ! grep -q -- '-F' "${TM_FAKE_ROOT}/ip6tables.log"; then
-  tm_pass "ipv6 endpoint is allowed through ip6tables"
-else
-  tm_fail "ipv6 endpoint did not install an ip6tables input rule"
-fi
 tm_expect_fail "udp ipv6 forward is rejected" \
   tm_action_forward_add --name v6dns --proto udp --listen-port 5301 \
   --dest-ip 2001:db8:1::2 --source-ip 2001:db8:1::1 --ingress-iface eth0 --yes
@@ -176,31 +124,8 @@ else
   tm_fail "ipv6 GRE dry-run was incomplete"
 fi
 
-shown=$(tm_action_tunnel_create --name pair --type wireguard \
-  --local-public-ip 203.0.113.30 --remote-public-ip 203.0.113.40 \
-  --local-tunnel-ip 10.200.1.1 --remote-tunnel-ip 10.200.1.2 \
-  --wan-iface eth0 --yes)
-pub=$(tr -d '[:space:]' <"$(tm_pub_file pair)")
-if [[ "$shown" == *"$pub"* && "$shown" != *"[REDACTED-KEY]"* ]]; then
-  tm_pass "public key is printed outside the log"
-else
-  tm_fail "public key was not printed"
-fi
-if grep -q "$pub" "$TM_LOG_FILE" || grep -q "$TM_TEST_PRIV" "$TM_LOG_FILE"; then
-  tm_fail "a wireguard key was written to the log"
-else
-  tm_pass "printed public key stayed out of the log"
-fi
-other="$(printf '%43s' '' | tr ' ' 'C')="
-tm_expect_fail "placeholder peer key is rejected" \
-  tm_action_tunnel_set_peer --name pair --peer-public-key '[REDACTED-KEY]' --yes
-tm_expect_ok "peer key can be pasted inside a sentence" \
-  tm_action_tunnel_set_peer --name pair --peer-public-key "use ${other} please" --yes
-if grep -q "TM_PEER_PUBLIC_KEY=${other}" "$(tm_tunnel_file pair)"; then
-  tm_pass "pasted peer key was stored"
-else
-  tm_fail "pasted peer key was not stored"
-fi
+tm_expect_fail "removed peer command is rejected" \
+  tm_action_tunnel_set_peer --name edge --peer-public-key "$TM_TEST_PUB" --yes
 tm_expect_ok "tcp forward takes addresses from the tunnel" \
   tm_action_forward_add --name auto --proto tcp --listen-port 9443 --tunnel edge --yes
 if grep -q -- '-i eth0 -p tcp --dport 9443' "${TM_FAKE_ROOT}/iptables.log" \
@@ -225,5 +150,29 @@ else
   tm_fail "bbr did not enable the expected settings"
 fi
 tm_expect_ok "bbr stays enabled" tm_action_bbr_enable --yes
+
+printf '%s\n' 'eth0 203.0.113.31/32' >>"${TM_FAKE_ROOT}/ip.addrs"
+set +e
+quick_text=$(tm_action_quick --dry-run --i-understand-no-encryption --token \
+  'v1:gre:link:203.0.113.10:203.0.113.31:10.200.0.1:10.200.0.2:30' 2>&1)
+set -e
+TM_DRY_RUN=0
+TM_ALLOW_GRE=0
+if [[ "$quick_text" == *"Dry-run"* && "$quick_text" == *"Start gre"* ]] \
+  && [[ ! -f "${TM_ETC}/tunnels/link.conf" ]]; then
+  tm_pass "foreign quick dry-run plans GRE and writes nothing"
+else
+  tm_fail "foreign quick dry-run was incomplete: ${quick_text}"
+fi
+set +e
+forward_text=$(tm_action_quick --token \
+  'v1:forward:fwd:203.0.113.10:203.0.113.31:203.0.113.10:203.0.113.31:32' 2>&1)
+set -e
+if [[ "$forward_text" == *"No tunnel is created"* ]]; then
+  tm_pass "plain forward needs no foreign tunnel"
+else
+  tm_fail "plain forward quick did not explain itself: ${forward_text}"
+fi
+tm_expect_fail "bad setup command is rejected" tm_action_quick --token 'not-a-setup'
 
 tm_finish

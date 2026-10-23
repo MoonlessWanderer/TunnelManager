@@ -15,8 +15,9 @@ TM_USAGE_LOADED=1
 tm_usage() {
   cat <<EOF
 Tunnel Manager ${TM_VERSION}
-Manage a WireGuard or GRE tunnel and TCP/UDP forwards between two servers.
-Tunnel addresses and endpoints may be IPv4 or IPv6. Port forwarding is IPv4 only.
+Forward TCP ports, or build a GRE tunnel, between an Iran server and a foreign server.
+GRE may use IPv4 or IPv6 endpoints. The menu and the setup command use IPv4.
+Port forwarding is IPv4 only. GRE has no encryption.
 
 Safety:
   The default route is never changed.
@@ -40,13 +41,11 @@ Usage:
   tunnel-manager apply [--dry-run] [--yes]
   tunnel-manager down [--dry-run] [--yes]
   tunnel-manager rollback [--dry-run] [--yes]
-  tunnel-manager tunnel keygen --name NAME
-  tunnel-manager tunnel create --name NAME --type wireguard|gre \\
+  tunnel-manager quick SETUP-COMMAND
+  tunnel-manager tunnel create --name NAME --type forward|gre \\
       --local-public-ip IP --remote-public-ip IP \\
       --local-tunnel-ip IP --remote-tunnel-ip IP --wan-iface IFACE \\
-      [--cidr 30] [--listen-port 51820] [--mtu N] [--peer-public-key KEY]
-      [--i-understand-no-encryption]
-  tunnel-manager tunnel set-peer --name NAME --peer-public-key KEY
+      [--cidr 30] [--mtu N] [--i-understand-no-encryption]
   tunnel-manager tunnel up|down|restart|test|show --name NAME
   tunnel-manager tunnel list
   tunnel-manager tunnel delete --name NAME [--yes]
@@ -68,9 +67,13 @@ Usage:
 tm opens the menu. tunnel-manager with no arguments does the same on a terminal.
 
 Menu:
-  1  Configure a New Tunnel. Quick WireGuard setup, or an advanced tunnel.
-  2  Manage Tunnels. Public key, peer key, port forward, test, restart,
-     delete, and maintenance.
+  1  Configure a New Tunnel. Choose Iran or foreign.
+     Iran detects its address, asks for the foreign address, then plain
+     port forward or GRE. Enter accepts a shown default. An empty port
+     line finishes the list. GRE with no ports is a tunnel only.
+     Iran prints one setup command for the foreign server.
+  2  Manage Tunnels. Lists saved tunnels, or says that none are saved.
+     Choosing a tunnel shows only that tunnel's actions.
   3  Update the program.
   4  Uninstall. One confirmation removes the program and all of its saved state.
   5  Enable BBR. Sets fq and bbr only. The default route is not changed.
@@ -81,6 +84,6 @@ Global flags:
   --verbose   Log the commands that pass the safety check.
 
 GRE tunnels require --i-understand-no-encryption or the exact phrase
-"GRE is not encrypted". WireGuard is the recommended tunnel type.
+"GRE is not encrypted". --yes does not skip that confirmation.
 EOF
 }

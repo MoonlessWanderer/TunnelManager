@@ -105,15 +105,14 @@ tm_backup_create_exec() {
     [[ -n "$name" ]] || continue
     cp -- "$(tm_tunnel_file "$name")" "$stage/tunnels/${name}.conf" || return 1
     if [[ "$include_keys" == "1" ]]; then
-      mkdir -p -- "$stage/keys" "$stage/wireguard"
+      if [[ -f "$(tm_key_file "$name")" || -f "$(tm_pub_file "$name")" ]]; then
+        mkdir -p -- "$stage/keys"
+      fi
       if [[ -f "$(tm_key_file "$name")" ]]; then
         cp -- "$(tm_key_file "$name")" "$stage/keys/${name}.key" || return 1
       fi
       if [[ -f "$(tm_pub_file "$name")" ]]; then
         cp -- "$(tm_pub_file "$name")" "$stage/keys/${name}.pub" || return 1
-      fi
-      if [[ -f "$(tm_wg_conf_file "$name")" ]]; then
-        cp -- "$(tm_wg_conf_file "$name")" "$stage/wireguard/tm-${name}.conf" || return 1
       fi
     fi
   done < <(tm_list_tunnels)
@@ -167,12 +166,6 @@ tm_backup_install_tree() {
     [[ -f "$f" ]] || continue
     tm_kv_file_ok "$f" || return 1
   done
-  if [[ "$include_keys" == "1" ]]; then
-    for f in "$stage/wireguard"/*.conf; do
-      [[ -f "$f" ]] || continue
-      tm_wg_assert_conf_safe "$f" || return 1
-    done
-  fi
   if [[ -f "$stage/host.conf" ]]; then
     cp -- "$stage/host.conf" "$(tm_host_file)" || return 1
     chmod 0600 "$(tm_host_file)" || return 1
@@ -218,7 +211,7 @@ tm_action_backup_create() {
   output="${opt[output]}"
   if [[ "${opt[include_keys]:-0}" == "1" ]]; then
     include="1"
-    tm_warn "This backup will contain WireGuard private keys. Store it somewhere restricted."
+    tm_warn "This backup will contain private keys. Store it somewhere restricted."
   fi
   if [[ "${TM_DRY_RUN:-0}" == "1" ]]; then
     tm_info "Dry-run: backup would be written to ${output}. include_keys=${include}."

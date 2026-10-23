@@ -118,7 +118,6 @@ if [[ "$SKIP_PACKAGES" -eq 0 ]]; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   apt-get install -y --no-install-recommends \
-    wireguard \
     iproute2 \
     iptables \
     nftables \

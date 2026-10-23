@@ -32,8 +32,6 @@ source "${_tm_load_dir}/os.sh"
 source "${_tm_load_dir}/net.sh"
 # shellcheck source=firewall.sh
 source "${_tm_load_dir}/firewall.sh"
-# shellcheck source=wireguard.sh
-source "${_tm_load_dir}/wireguard.sh"
 # shellcheck source=gre.sh
 source "${_tm_load_dir}/gre.sh"
 # shellcheck source=haproxy.sh
@@ -42,6 +40,8 @@ source "${_tm_load_dir}/haproxy.sh"
 source "${_tm_load_dir}/forward.sh"
 # shellcheck source=tunnel.sh
 source "${_tm_load_dir}/tunnel.sh"
+# shellcheck source=setup.sh
+source "${_tm_load_dir}/setup.sh"
 # shellcheck source=apply.sh
 source "${_tm_load_dir}/apply.sh"
 # shellcheck source=backup.sh

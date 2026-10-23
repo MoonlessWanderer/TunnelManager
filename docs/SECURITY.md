@@ -24,13 +24,16 @@ administer, and review every plan before confirming it.
   `net.core.default_qdisc` and `net.ipv4.tcp_congestion_control`.
 - Include private keys in a backup unless `--include-keys` is set.
 
-## Keys
+## Setup command
 
-`wg genkey` output is stored mode `0600`. The peer bundle and normal backups
-contain the public key only. Logs replace 43-character base64 keys with
-`[REDACTED-KEY]`, so a public key must be copied from the terminal line that
-starts with the key itself, or from menu item "Show my public key". The plan
-prints descriptions rather than command argv.
+The Iran server prints `tunnel-manager quick` plus one token. The token
+contains the tunnel type, name, public addresses, and GRE inner addresses.
+It contains no key. The foreign server checks that the foreign address is
+configured locally before it creates GRE. A plain forward token does not
+create a tunnel on the foreign server.
+
+Logs still replace 43-character base64 strings with `[REDACTED-KEY]`. The
+plan prints descriptions rather than command argv.
 
 ## Firewall interaction
 

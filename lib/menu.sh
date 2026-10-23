@@ -212,68 +212,64 @@ tm_menu_prompt_host_ip() {
   done
 }
 
-tm_menu_create_tunnel() {
-  local name="" type="" local_pub="" remote_pub="" local_tun="" remote_tun="" wan="" peer="" cidr="30"
-  tm_menu_prefill_uplink wan local_pub
-  tm_prompt name "Tunnel name" "edge" || return 1
-  tm_prompt type "Type: wireguard or gre" "wireguard" || return 1
-  tm_menu_prompt_host_ip local_pub "Local reachable IPv4 or IPv6" || return 1
-  tm_menu_prompt_host_ip remote_pub "Remote reachable IPv4 or IPv6" "$local_pub" || return 1
-  tm_prompt local_tun "Local tunnel IP" || return 1
-  tm_prompt remote_tun "Remote tunnel IP" || return 1
-  if [[ "$local_tun" == *:* ]]; then
-    tm_prompt cidr "Prefix length" "64" || return 1
-  else
-    tm_prompt cidr "Prefix length" "30" || return 1
-  fi
-  wan=$(tm_detect_wan "$wan" "$local_pub" "$remote_pub" || true)
-  tm_menu_apply_iface wan || return 1
-  if [[ "$type" == "wireguard" ]]; then
-    tm_prompt peer "Peer public key, or '-' to generate a pending tunnel" "-" || return 1
-    if [[ "$peer" == "-" ]]; then
-      tm_menu_run tm_action_tunnel_create --name "$name" --type wireguard \
-        --local-public-ip "$local_pub" --remote-public-ip "$remote_pub" \
-        --local-tunnel-ip "$local_tun" --remote-tunnel-ip "$remote_tun" \
-        --cidr "$cidr" --wan-iface "$wan"
-    else
-      tm_menu_run tm_action_tunnel_create --name "$name" --type wireguard \
-        --local-public-ip "$local_pub" --remote-public-ip "$remote_pub" \
-        --local-tunnel-ip "$local_tun" --remote-tunnel-ip "$remote_tun" \
-        --cidr "$cidr" --wan-iface "$wan" --peer-public-key "$peer"
+tm_menu_prompt_ipv4() {
+  local -n _tm_v4=$1
+  local label="$2"
+  local other="${3:-}"
+  local candidate=""
+  candidate="${_tm_v4}"
+  while true; do
+    tm_menu_prompt_host_ip candidate "$label" "$other" || return 1
+    if tm_valid_ipv4 "$candidate"; then
+      _tm_v4="$candidate"
+      return 0
     fi
-  else
-    tm_menu_run tm_action_tunnel_create --name "$name" --type gre \
-      --local-public-ip "$local_pub" --remote-public-ip "$remote_pub" \
-      --local-tunnel-ip "$local_tun" --remote-tunnel-ip "$remote_tun" \
-      --cidr "$cidr" --wan-iface "$wan"
-  fi
+    tm_warn "Enter an IPv4 address. The setup command supports IPv4."
+    candidate=""
+  done
 }
 
-tm_menu_show_key() {
-  local name=""
-  tm_prompt name "Tunnel name" "$(tm_menu_default_tunnel)" || return 1
-  tm_print_public_key "$name" || tm_die "No public key is stored for ${name}."
-}
-
-tm_menu_paste_peer() {
-  local name="" peer=""
-  tm_prompt name "Tunnel name" "$(tm_menu_default_tunnel)" || return 1
-  tm_prompt peer "Paste the other server public key" || return 1
-  peer=$(tm_normalize_wg_key "$peer") || return 1
-  tm_action_tunnel_set_peer --name "$name" --peer-public-key "$peer"
-}
-
-tm_menu_quick_forward() {
-  local port="" proto="" tunnel="" name=""
-  tm_prompt port "Port on this server" "443" || return 1
-  tm_prompt proto "tcp or udp" "tcp" || return 1
-  tm_prompt tunnel "Tunnel name" "$(tm_menu_default_tunnel)" || return 1
-  if [[ "$proto" == "tcp" && "$port" == "443" ]]; then
-    name="web"
-  else
-    name="${proto}${port}"
-  fi
-  tm_action_forward_add --name "$name" --proto "$proto" --listen-port "$port" --tunnel "$tunnel"
+tm_menu_collect_ports() {
+  local -n _tm_spec=$1
+  local required="$2"
+  local line="" listen="" dest="" spec="" piece=""
+  printf '\n%s\n' "TCP ports. One per line: 443 or 443=2053" >/dev/tty
+  printf '%s\n' "Press Enter on an empty line to finish." >/dev/tty
+  while true; do
+    line=""
+    tm_prompt line "TCP port" || return 1
+    if [[ -z "$line" ]]; then
+      if [[ "$required" == "yes" && -z "$spec" ]]; then
+        tm_warn "A plain port forward needs at least one TCP port."
+        continue
+      fi
+      _tm_spec="$spec"
+      return 0
+    fi
+    if [[ "$line" == *=* ]]; then
+      listen="${line%%=*}"
+      dest="${line#*=}"
+      piece="${listen}=${dest}"
+    else
+      listen="$line"
+      dest="$line"
+      piece="$listen"
+    fi
+    if ! tm_valid_port "$listen" || ! tm_valid_port "$dest"; then
+      tm_warn "Use a port from 1 to 65535, or LISTEN=DEST."
+      continue
+    fi
+    if tm_port_is_protected "$listen"; then
+      tm_warn "Port ${listen} is reserved for SSH."
+      continue
+    fi
+    if [[ -n "$spec" ]]; then
+      spec="${spec},${piece}"
+    else
+      spec="$piece"
+    fi
+    tm_info "Added ${listen} -> ${dest}"
+  done
 }
 
 tm_menu_apply_iface() {
@@ -312,60 +308,224 @@ tm_menu_iface_present() {
   return 0
 }
 
-tm_menu_quick_setup() {
-  local role="" local_pub="" remote_pub="" wan="" peer="" ssh_port=""
-  local local_tun="" remote_tun=""
-  tm_menu_prefill_uplink wan local_pub
+tm_menu_setup_iran() {
+  local local_pub="" remote_pub="" wan="" ssh_port="" kind=""
+  local name="" local_tun="" remote_tun="" cidr="32" ports=""
+  local saved_yes="" saved_gre=""
   ssh_port=$(tm_menu_ssh_port)
-  if [[ -f "$(tm_tunnel_file edge)" ]]; then
-    tm_info "Tunnel edge already exists. Its public key is printed below."
-    tm_print_public_key edge || tm_die "Tunnel edge has no public key."
-    tm_info "On the other server, open Manage Tunnels and paste this public key."
-    return 0
-  fi
-  tm_prompt role "This server: iran or foreign" "iran" || return 1
-  case "$role" in
-    iran)
-      local_tun="10.200.0.1"
-      remote_tun="10.200.0.2"
-      ;;
-    foreign)
-      local_tun="10.200.0.2"
-      remote_tun="10.200.0.1"
-      ;;
+  tm_menu_prefill_uplink wan local_pub
+  tm_menu_prompt_ipv4 local_pub "This server IPv4" || return 1
+  tm_menu_prompt_ipv4 remote_pub "Foreign server IPv4" "$local_pub" || return 1
+  kind=$(tm_menu_choose "Tunnel type" "Back" "Plain port forward" "GRE tunnel") || return 1
+  case "$kind" in
+    1) kind="forward" ;;
+    2) kind="gre" ;;
+    0) return 0 ;;
     *)
-      tm_die "Role must be iran or foreign."
+      tm_warn "Unknown choice."
+      return 0
       ;;
   esac
-  tm_menu_prompt_host_ip local_pub "This server reachable IP" || return 1
-  tm_menu_prompt_host_ip remote_pub "Other server reachable IP" "$local_pub" || return 1
-  wan=$(tm_detect_wan "$wan" "$local_pub" "$remote_pub" || true)
-  tm_menu_apply_iface wan || return 1
-  tm_prompt peer "Other server public key, or Enter if you do not have it yet" "-" || return 1
-  printf '\n%s\n' "WireGuard edge will use ${local_tun} on this server and ${remote_tun} on the other."
-  printf '%s\n' "Listen port 51820 and prefix 30 are filled in automatically. WAN interface is ${wan}."
-  if [[ ! -f "$(tm_host_file)" ]]; then
-    tm_action_init --role "$role" --public-ip "$local_pub" --wan-iface "$wan" --ssh-port "$ssh_port"
-  fi
-  if [[ "$peer" == "-" ]]; then
-    tm_action_tunnel_create --name edge --type wireguard \
-      --local-public-ip "$local_pub" --remote-public-ip "$remote_pub" \
-      --local-tunnel-ip "$local_tun" --remote-tunnel-ip "$remote_tun" \
-      --wan-iface "$wan"
+  if [[ "$kind" == "gre" ]]; then
+    local_tun="10.200.0.1"
+    remote_tun="10.200.0.2"
+    cidr="30"
+    tm_prompt local_tun "Local tunnel IP" "$local_tun" || return 1
+    tm_prompt remote_tun "Remote tunnel IP" "$remote_tun" || return 1
+    tm_prompt cidr "Prefix length" "$cidr" || return 1
+    if ! tm_tunnel_pair_ok "$local_tun" "$remote_tun" "$cidr"; then
+      tm_warn "Those tunnel addresses are not two different hosts in one IPv4 prefix from 24 to 31."
+      return 1
+    fi
   else
-    peer=$(tm_normalize_wg_key "$peer") || return 1
-    tm_action_tunnel_create --name edge --type wireguard \
-      --local-public-ip "$local_pub" --remote-public-ip "$remote_pub" \
-      --local-tunnel-ip "$local_tun" --remote-tunnel-ip "$remote_tun" \
-      --wan-iface "$wan" --peer-public-key "$peer"
+    local_tun="$local_pub"
+    remote_tun="$remote_pub"
   fi
+  wan=$(tm_detect_wan "$wan" "$local_pub" "$remote_pub" || true)
+  if ! tm_valid_iface "$wan" || ! tm_menu_iface_present "$wan"; then
+    tm_menu_apply_iface wan || return 1
+  fi
+  if [[ "$kind" == "forward" ]]; then
+    tm_menu_collect_ports ports yes || return 1
+  else
+    tm_menu_collect_ports ports no || return 1
+  fi
+  name=$(tm_setup_alloc_name "$kind") || return 1
+  {
+    printf '\n%s\n' "Iran ${local_pub} -> foreign ${remote_pub}"
+    printf '%s\n' "Type ${kind}, name ${name}, WAN ${wan}"
+    if [[ "$kind" == "gre" ]]; then
+      printf '%s\n' "Inner ${local_tun} -> ${remote_tun}/${cidr}"
+    fi
+    if [[ -n "$ports" ]]; then
+      printf '%s\n' "TCP ports ${ports}"
+    else
+      printf '%s\n' "No TCP ports. GRE tunnel only."
+    fi
+  } >/dev/tty
+  if [[ "$kind" == "gre" ]]; then
+    tm_gre_warning_text >/dev/tty
+    if ! tm_confirm_phrase "GRE is not encrypted" "Type 'GRE is not encrypted' to continue:"; then
+      tm_info "Setup was not started."
+      return 0
+    fi
+  fi
+  if ! tm_confirm "Apply this setup?"; then
+    tm_info "Setup was not started."
+    return 0
+  fi
+  saved_yes="${TM_YES:-0}"
+  saved_gre="${TM_ALLOW_GRE:-0}"
+  TM_YES=1
+  if [[ "$kind" == "gre" ]]; then
+    TM_ALLOW_GRE=1
+  fi
+  tm_menu_run tm_setup_apply_iran "$name" "$kind" "$local_pub" "$remote_pub" \
+    "$local_tun" "$remote_tun" "$cidr" "$wan" "$ssh_port" "$ports"
+  TM_YES="$saved_yes"
+  TM_ALLOW_GRE="$saved_gre"
 }
 
-tm_menu_named() {
-  local action="$1"
-  local name=""
-  tm_prompt name "Tunnel name" "$(tm_menu_default_tunnel)" || return 1
-  tm_menu_run "$action" --name "$name"
+tm_menu_setup_foreign() {
+  local pasted="" token="" saved_yes="" saved_gre=""
+  local -A parsed=()
+  tm_prompt pasted "Paste the setup command from the Iran server" || return 1
+  if ! token=$(tm_setup_extract_token "$pasted"); then
+    tm_warn "That text does not contain a setup command."
+    return 1
+  fi
+  if ! tm_setup_parse_token "$token" parsed; then
+    tm_warn "The setup command is invalid."
+    return 1
+  fi
+  if [[ "${parsed[type]}" != "gre" ]]; then
+    tm_menu_run tm_action_quick --token "$token"
+    return 0
+  fi
+  tm_gre_warning_text >/dev/tty
+  if ! tm_confirm_phrase "GRE is not encrypted" "Type 'GRE is not encrypted' to continue:"; then
+    tm_info "Setup was not started."
+    return 0
+  fi
+  if ! tm_confirm "Apply this GRE tunnel on the foreign server?"; then
+    tm_info "Setup was not started."
+    return 0
+  fi
+  saved_yes="${TM_YES:-0}"
+  saved_gre="${TM_ALLOW_GRE:-0}"
+  TM_YES=1
+  TM_ALLOW_GRE=1
+  tm_menu_run tm_action_quick --token "$token" --yes --i-understand-no-encryption
+  TM_YES="$saved_yes"
+  TM_ALLOW_GRE="$saved_gre"
+}
+
+tm_menu_show_tunnel() {
+  local name="$1"
+  local line
+  local -A row=()
+  tm_tunnel_load "$name" row || {
+    tm_warn "Tunnel ${name} was not found."
+    return 1
+  }
+  printf '\n%s\n' "name=${name}"
+  printf '%s\n' "type=${row[TM_TUNNEL_TYPE]:-}"
+  printf '%s\n' "state=${row[TM_TUNNEL_STATE]:-}"
+  printf '%s\n' "public=${row[TM_LOCAL_PUBLIC_IP]:-} -> ${row[TM_REMOTE_PUBLIC_IP]:-}"
+  if [[ "${row[TM_TUNNEL_TYPE]:-}" == "gre" ]]; then
+    printf '%s\n' "inner=${row[TM_LOCAL_TUNNEL_IP]:-} -> ${row[TM_REMOTE_TUNNEL_IP]:-}/${row[TM_TUNNEL_CIDR]:-}"
+    printf '%s\n' "interface=$(tm_tunnel_iface "$name")"
+  fi
+  printf '%s\n' "wan=${row[TM_WAN_IFACE]:-}"
+  if tm_setup_forwards_for "$name" | grep -q .; then
+    printf '%s\n' "ports:"
+    while IFS= read -r line; do
+      printf '  %s\n' "$line"
+    done < <(tm_setup_forwards_for "$name")
+  else
+    printf '%s\n' "ports=none"
+  fi
+  tm_menu_pause
+}
+
+tm_menu_add_port() {
+  local name="$1"
+  local port_list="" saved_yes=""
+  tm_menu_collect_ports port_list yes || return 1
+  if ! tm_confirm "Add these TCP ports to ${name}?"; then
+    tm_info "No ports were added."
+    return 0
+  fi
+  saved_yes="${TM_YES:-0}"
+  TM_YES=1
+  tm_menu_run tm_setup_add_ports "$name" "$port_list"
+  TM_YES="$saved_yes"
+}
+
+tm_menu_remove_port() {
+  local tunnel="$1"
+  local -a labels=() ids=()
+  local line="" fname="" proto="" listen="" dest="" choice=""
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    IFS=$' \t\n' read -r fname proto listen dest <<<"$line"
+    ids+=("$fname")
+    labels+=("${fname}  ${proto} ${listen} -> ${dest}")
+  done < <(tm_setup_forwards_for "$tunnel")
+  if [[ "${#ids[@]}" -eq 0 ]]; then
+    tm_info "This tunnel has no port forwards."
+    tm_menu_pause
+    return 0
+  fi
+  choice=$(tm_menu_choose "Remove a TCP port" "Back" "${labels[@]}") || return 1
+  if [[ "$choice" == "0" ]]; then
+    return 0
+  fi
+  if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#ids[@]} )); then
+    tm_warn "Unknown choice."
+    return 0
+  fi
+  tm_menu_run tm_action_forward_delete --name "${ids[$((choice - 1))]}"
+}
+
+tm_menu_tunnel() {
+  local name="$1"
+  local -A row=()
+  local -a actions=()
+  local choice="" label=""
+  while true; do
+    if ! tm_tunnel_load "$name" row; then
+      tm_info "Tunnel ${name} is gone."
+      return 0
+    fi
+    actions=("Show details" "Test" "Add a TCP port" "Remove a TCP port" "Delete")
+    if [[ "${row[TM_TUNNEL_TYPE]:-}" == "gre" ]]; then
+      actions=("Show details" "Test" "Add a TCP port" "Remove a TCP port" "Restart" "Delete")
+    fi
+    choice=$(tm_menu_choose "Tunnel ${name}" "Back" "${actions[@]}") || return 1
+    if [[ "$choice" == "0" ]]; then
+      return 0
+    fi
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#actions[@]} )); then
+      tm_warn "Unknown choice."
+      continue
+    fi
+    label="${actions[$((choice - 1))]}"
+    case "$label" in
+      "Show details") tm_menu_show_tunnel "$name" ;;
+      "Test") tm_menu_run tm_action_tunnel_test --name "$name" ;;
+      "Add a TCP port") tm_menu_add_port "$name" ;;
+      "Remove a TCP port") tm_menu_remove_port "$name" ;;
+      "Restart") tm_menu_run tm_action_tunnel_restart --name "$name" ;;
+      "Delete")
+        tm_menu_run tm_action_tunnel_delete --name "$name"
+        if [[ ! -f "$(tm_tunnel_file "$name")" ]]; then
+          return 0
+        fi
+        ;;
+      *) tm_warn "Unknown choice." ;;
+    esac
+  done
 }
 
 tm_menu_uninstall_script() {
@@ -389,8 +549,8 @@ tm_menu_uninstall() {
   local script="" prefix=""
   script=$(tm_menu_uninstall_script) || tm_die "uninstall.sh was not found. Reinstall Tunnel Manager."
   prefix="${TM_PREFIX:-/usr/local}"
-  printf '\n%s\n' "This deletes the program, saved tunnels, keys, logs, and Tunnel Manager WireGuard configs."
-  printf '%s\n' "A missing file is skipped. Other firewall rules and the wireguard and haproxy packages stay."
+  printf '\n%s\n' "This deletes the program, saved tunnels, forwards, logs, and leftover Tunnel Manager configs."
+  printf '%s\n' "A missing file is skipped. Other firewall rules stay in place."
   if ! tm_confirm "Uninstall Tunnel Manager?"; then
     tm_info "Uninstall was not started."
     return 0
@@ -402,12 +562,10 @@ tm_menu_uninstall() {
 tm_menu_configure() {
   local choice=""
   while true; do
-    choice=$(tm_menu_choose "Configure a New Tunnel" "Back" \
-      "Quick WireGuard setup" \
-      "Advanced tunnel") || return 1
+    choice=$(tm_menu_choose "This server" "Back" "Iran" "Foreign") || return 1
     case "$choice" in
-      1) tm_menu_run tm_menu_quick_setup ;;
-      2) tm_menu_create_tunnel ;;
+      1) tm_menu_setup_iran ;;
+      2) tm_menu_setup_foreign ;;
       0) return 0 ;;
       *) tm_warn "Unknown choice." ;;
     esac
@@ -446,29 +604,39 @@ tm_menu_maintenance() {
 }
 
 tm_menu_manage() {
-  local choice=""
+  local -a names=() labels=()
+  local name="" choice=""
   while true; do
-    choice=$(tm_menu_choose "Manage Tunnels" "Back" \
-      "Show public key" \
-      "Paste the other server key" \
-      "Forward a port" \
-      "Test tunnel" \
-      "Restart tunnel" \
-      "Delete tunnel" \
-      "Port forwards" \
-      "Maintenance") || return 1
-    case "$choice" in
-      1) tm_menu_show_key; tm_menu_pause ;;
-      2) tm_menu_run tm_menu_paste_peer ;;
-      3) tm_menu_run tm_menu_quick_forward ;;
-      4) tm_menu_named tm_action_tunnel_test ;;
-      5) tm_menu_named tm_action_tunnel_restart ;;
-      6) tm_menu_named tm_action_tunnel_delete ;;
-      7) tm_menu_forward ;;
-      8) tm_menu_maintenance ;;
-      0) return 0 ;;
-      *) tm_warn "Unknown choice." ;;
-    esac
+    names=()
+    labels=()
+    while IFS= read -r name; do
+      [[ -n "$name" ]] || continue
+      names+=("$name")
+    done < <(tm_list_tunnels)
+    if [[ "${#names[@]}" -eq 0 ]]; then
+      tm_info "No tunnels are saved."
+      choice=$(tm_menu_choose "Manage Tunnels" "Back" "Maintenance") || return 1
+      case "$choice" in
+        1) tm_menu_maintenance ;;
+        0) return 0 ;;
+        *) tm_warn "Unknown choice." ;;
+      esac
+      continue
+    fi
+    labels=("${names[@]}" "Maintenance")
+    choice=$(tm_menu_choose "Manage Tunnels" "Back" "${labels[@]}") || return 1
+    if [[ "$choice" == "0" ]]; then
+      return 0
+    fi
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#labels[@]} )); then
+      tm_warn "Unknown choice."
+      continue
+    fi
+    if [[ "$choice" -eq ${#labels[@]} ]]; then
+      tm_menu_maintenance
+      continue
+    fi
+    tm_menu_tunnel "${names[$((choice - 1))]}"
   done
 }
 

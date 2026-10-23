@@ -51,24 +51,14 @@ tm_tunnel_fill_defaults() {
   if tm_valid_ipv6 "${_tm_fill[local_tunnel_ip]:-}"; then
     inner=6
   fi
-  if [[ "${_tm_fill[type]}" == "wireguard" ]]; then
-    [[ -n "${_tm_fill[listen_port]:-}" ]] || _tm_fill[listen_port]=51820
-    [[ -n "${_tm_fill[endpoint_port]:-}" ]] || _tm_fill[endpoint_port]="${_tm_fill[listen_port]}"
-    if [[ -z "${_tm_fill[mtu]:-}" ]]; then
-      if [[ "$outer" == "6" ]]; then
-        _tm_fill[mtu]=1400
-      else
-        _tm_fill[mtu]=1420
-      fi
-    fi
-    [[ -n "${_tm_fill[keepalive]:-}" ]] || _tm_fill[keepalive]=25
-    if [[ -z "${_tm_fill[cidr]:-}" ]]; then
-      if [[ "$inner" == "6" ]]; then
-        _tm_fill[cidr]=64
-      else
-        _tm_fill[cidr]=30
-      fi
-    fi
+  if [[ "${_tm_fill[type]}" == "forward" ]]; then
+    [[ -n "${_tm_fill[local_tunnel_ip]:-}" ]] || _tm_fill[local_tunnel_ip]="${_tm_fill[local_public_ip]}"
+    [[ -n "${_tm_fill[remote_tunnel_ip]:-}" ]] || _tm_fill[remote_tunnel_ip]="${_tm_fill[remote_public_ip]}"
+    [[ -n "${_tm_fill[mtu]:-}" ]] || _tm_fill[mtu]=1500
+    [[ -n "${_tm_fill[cidr]:-}" ]] || _tm_fill[cidr]=32
+    _tm_fill['listen_port']="${_tm_fill['listen_port']:-1}"
+    _tm_fill['endpoint_port']="${_tm_fill['endpoint_port']:-1}"
+    _tm_fill['keepalive']="${_tm_fill['keepalive']:-0}"
   else
     if [[ -z "${_tm_fill[mtu]:-}" ]]; then
       if [[ "$outer" == "6" ]]; then
@@ -84,9 +74,9 @@ tm_tunnel_fill_defaults() {
         _tm_fill[cidr]=30
       fi
     fi
-    _tm_fill[listen_port]="${_tm_fill[listen_port]:-1}"
-    _tm_fill[endpoint_port]="${_tm_fill[endpoint_port]:-1}"
-    _tm_fill[keepalive]="${_tm_fill[keepalive]:-0}"
+    _tm_fill['listen_port']="${_tm_fill['listen_port']:-1}"
+    _tm_fill['endpoint_port']="${_tm_fill['endpoint_port']:-1}"
+    _tm_fill['keepalive']="${_tm_fill['keepalive']:-0}"
   fi
 }
 
@@ -97,7 +87,7 @@ tm_tunnel_validate_request() {
     return 1
   }
   tm_valid_tunnel_type "${_tm_req[type]}" || {
-    tm_error "Tunnel type must be wireguard or gre."
+    tm_error "Tunnel type must be forward or gre."
     return 1
   }
   tm_public_pair_ok "${_tm_req[local_public_ip]}" "${_tm_req[remote_public_ip]}" || {
@@ -109,30 +99,29 @@ tm_tunnel_validate_request() {
     return 1
   }
   tm_tunnel_fill_defaults _tm_req
-  tm_tunnel_pair_ok "${_tm_req[local_tunnel_ip]}" "${_tm_req[remote_tunnel_ip]}" "${_tm_req[cidr]}" || {
-    tm_error "Tunnel addresses must be different hosts in the same prefix. IPv4 uses 24-31. IPv6 uses 64-127."
-    return 1
-  }
+  if [[ "${_tm_req[type]}" == "forward" ]]; then
+    tm_ip_is_unicast_host "${_tm_req[local_tunnel_ip]}" || {
+      tm_error "The forward source address is invalid."
+      return 1
+    }
+    tm_ip_is_unicast_host "${_tm_req[remote_tunnel_ip]}" || {
+      tm_error "The forward destination address is invalid."
+      return 1
+    }
+    if [[ "$(tm_ip_family "${_tm_req[local_tunnel_ip]}")" != "$(tm_ip_family "${_tm_req[remote_tunnel_ip]}")" ]]; then
+      tm_error "Forward source and destination must use the same IP family."
+      return 1
+    fi
+  else
+    tm_tunnel_pair_ok "${_tm_req[local_tunnel_ip]}" "${_tm_req[remote_tunnel_ip]}" "${_tm_req[cidr]}" || {
+      tm_error "Tunnel addresses must be different hosts in the same prefix. IPv4 uses 24-31. IPv6 uses 64-127."
+      return 1
+    }
+  fi
   tm_valid_mtu "${_tm_req[mtu]}" || {
     tm_error "MTU must be between 1280 and 1500."
     return 1
   }
-  if [[ "${_tm_req[type]}" == "wireguard" ]]; then
-    tm_valid_port "${_tm_req[listen_port]}" || return 1
-    tm_valid_port "${_tm_req[endpoint_port]}" || return 1
-    tm_valid_keepalive "${_tm_req[keepalive]}" || return 1
-    if [[ -n "${_tm_req[peer_public_key]:-}" ]] && ! tm_valid_wg_key "${_tm_req[peer_public_key]}"; then
-      tm_error "The peer public key is not a WireGuard key."
-      return 1
-    fi
-    local mtu_limit=1420
-    if [[ "$(tm_ip_family "${_tm_req[local_public_ip]}")" == "6" ]]; then
-      mtu_limit=1400
-    fi
-    if (( _tm_req[mtu] > mtu_limit )); then
-      tm_warn "WireGuard MTU ${_tm_req[mtu]} is above ${mtu_limit} and may fragment on this path."
-    fi
-  fi
   return 0
 }
 
@@ -145,12 +134,8 @@ tm_tunnel_state_write_exec() {
   local local_tun="$6"
   local remote_tun="$7"
   local cidr="$8"
-  local listen_port="$9"
-  local endpoint_port="${10}"
   local mtu="${11}"
-  local keepalive="${12}"
   local wan="${13}"
-  local peer="${14}"
   local gre_ack="${15}"
   local -a pairs=()
   tm_ensure_tree || return 1
@@ -167,17 +152,6 @@ tm_tunnel_state_write_exec() {
     TM_WAN_IFACE "$wan"
     TM_GRE_ACK "$gre_ack"
   )
-  if [[ "$type" == "wireguard" ]]; then
-    pairs+=(
-      TM_PRIVATE_KEY_FILE "$(tm_key_file "$name")"
-      TM_LISTEN_PORT "$listen_port"
-      TM_ENDPOINT_PORT "$endpoint_port"
-      TM_KEEPALIVE "$keepalive"
-    )
-    if [[ -n "$peer" ]]; then
-      pairs+=(TM_PEER_PUBLIC_KEY "$peer")
-    fi
-  fi
   tm_kv_write "$(tm_tunnel_file "$name")" 0600 "${pairs[@]}"
 }
 
@@ -196,23 +170,16 @@ tm_tunnel_start_exec() {
   tm_tunnel_load "$name" row || return 1
   iface=$(tm_tunnel_iface "$name")
   family=$(tm_ip_family "${row[TM_LOCAL_PUBLIC_IP]}") || return 1
-  if [[ "${row[TM_TUNNEL_STATE]}" == "pending-peer" ]]; then
-    tm_info "Tunnel ${name} is waiting for a peer public key, so it will not start."
+  if [[ "${row[TM_TUNNEL_TYPE]}" == "forward" ]]; then
     return 0
   fi
-  if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]]; then
-    tm_wg_conf_write_exec "$name" \
-      "${row[TM_LOCAL_TUNNEL_IP]}" "${row[TM_TUNNEL_CIDR]}" "${row[TM_LISTEN_PORT]}" \
-      "${row[TM_MTU]}" "${row[TM_PEER_PUBLIC_KEY]}" "${row[TM_REMOTE_TUNNEL_IP]}" \
-      "${row[TM_REMOTE_PUBLIC_IP]}" "${row[TM_ENDPOINT_PORT]}" "${row[TM_KEEPALIVE]}" || return 1
-    if tm_iface_exists "$iface"; then
-      tm_info "WireGuard interface ${iface} is already up."
-    else
-      tm_wg_up_exec "$name" || return 1
-    fi
-    tm_rp_filter_apply_exec "$iface" || return 1
-    tm_fw_input_apply_exec wg "$name" "${row[TM_WAN_IFACE]}" "${row[TM_LISTEN_PORT]}" "$family" || return 1
-    return 0
+  if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" || "${row[TM_TUNNEL_STATE]}" == "pending-peer" ]]; then
+    tm_error "WireGuard has been removed. Delete tunnel ${name} and create a GRE tunnel or a port forward."
+    return 1
+  fi
+  if [[ "${row[TM_TUNNEL_TYPE]}" != "gre" ]]; then
+    tm_error "Tunnel ${name} has unsupported type ${row[TM_TUNNEL_TYPE]}."
+    return 1
   fi
   if [[ "${row[TM_GRE_ACK]}" != "yes" ]]; then
     tm_error "Refusing to start GRE tunnel ${name} without a stored encryption acknowledgement."
@@ -234,9 +201,14 @@ tm_tunnel_stop_exec() {
   if tm_iface_exists "$iface"; then
     tm_rp_filter_restore_exec "$iface" || return 1
   fi
+  if [[ "${row[TM_TUNNEL_TYPE]}" == "forward" ]]; then
+    return 0
+  fi
   if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]]; then
     tm_fw_input_delete_exec wg "$name" "$family" || return 1
-    tm_wg_down_exec "$name" || return 1
+    if tm_iface_exists "$iface"; then
+      tm_must ip link del dev "$iface" || return 1
+    fi
     return 0
   fi
   tm_fw_input_delete_exec gre "$name" "$family" || return 1
@@ -261,9 +233,12 @@ tm_tunnel_require_gre_ack() {
 tm_action_tunnel_create() {
   local -A opt=()
   local -A req=()
-  local state="active" gre_ack="no" peer=""
+  local gre_ack="no" link_kind status=0
   tm_opts_parse opt "$@"
   tm_opts_bind_flags opt
+  if [[ -n "${opt[peer_public_key]:-}" || -n "${opt[peer_file]:-}" ]]; then
+    tm_die "WireGuard has been removed. Peer keys are not used."
+  fi
   req[name]=$(tm_opt_get opt name)
   req[type]=$(tm_opt_get opt type)
   req[local_public_ip]=$(tm_opt_get opt local_public_ip)
@@ -276,20 +251,9 @@ tm_action_tunnel_create() {
   req[mtu]=$(tm_opt_get opt mtu)
   req[keepalive]=$(tm_opt_get opt keepalive)
   req[wan_iface]=$(tm_opt_get opt wan_iface)
-  req[peer_public_key]=$(tm_opt_get opt peer_public_key)
-  if [[ -f "$(tm_peer_import_candidate "${opt[peer_file]:-}")" ]]; then
-    tm_tunnel_apply_peer_file req "${opt[peer_file]}"
-  fi
-  if [[ -n "${req[peer_public_key]:-}" ]]; then
-    req[peer_public_key]=$(tm_normalize_wg_key "${req[peer_public_key]}") || return 1
-  fi
   tm_tunnel_validate_request req || tm_die "Tunnel validation failed."
   if [[ -f "$(tm_tunnel_file "${req[name]}")" ]]; then
     tm_die "Tunnel ${req[name]} already exists."
-  fi
-  peer="${req[peer_public_key]:-}"
-  if [[ "${req[type]}" == "wireguard" && -z "$peer" ]]; then
-    state="pending-peer"
   fi
   if [[ "${req[type]}" == "gre" ]]; then
     gre_ack="yes"
@@ -302,37 +266,28 @@ tm_action_tunnel_create() {
   tm_plan_add "Prepare Tunnel Manager directories" \
     "$(tm_shell_quote tm_noop)" \
     tm_ensure_tree
-  if [[ "${req[type]}" == "wireguard" && ! -f "$(tm_key_file "${req[name]}")" ]]; then
-    tm_plan_add "Generate a WireGuard key pair for ${req[name]} (private key mode 0600)" \
-      "$(tm_shell_quote tm_wg_key_undo "${req[name]}")" \
-      tm_wg_keygen_exec "${req[name]}"
-  fi
-  tm_plan_add "Write tunnel state ${req[name]} (${state}). Connected tunnel routes only; the default route is not changed." \
+  tm_plan_add "Write tunnel state ${req[name]} (active). The default route is not changed." \
     "$(tm_shell_quote tm_tunnel_state_undo "${req[name]}")" \
-    tm_tunnel_state_write_exec "${req[name]}" "${req[type]}" "$state" \
+    tm_tunnel_state_write_exec "${req[name]}" "${req[type]}" active \
       "${req[local_public_ip]}" "${req[remote_public_ip]}" \
       "${req[local_tunnel_ip]}" "${req[remote_tunnel_ip]}" "${req[cidr]}" \
       "${req[listen_port]}" "${req[endpoint_port]}" "${req[mtu]}" "${req[keepalive]}" \
-      "${req[wan_iface]}" "$peer" "$gre_ack"
-  if [[ "$state" == "active" ]]; then
-    local link_kind="${req[type]}"
+      "${req[wan_iface]}" "" "$gre_ack"
+  if [[ "${req[type]}" == "forward" ]]; then
+    tm_plan_add "Save port-forward ${req[name]}. No tunnel interface is created." \
+      "$(tm_shell_quote tm_tunnel_stop_exec "${req[name]}")" \
+      tm_tunnel_start_exec "${req[name]}"
+  else
+    link_kind="${req[type]}"
     if [[ "$link_kind" == "gre" && "$(tm_ip_family "${req[local_public_ip]}")" == "6" ]]; then
       link_kind="ip6gre"
     fi
     tm_plan_add "Start ${link_kind} tunnel ${req[name]} on $(tm_tunnel_iface "${req[name]}")" \
       "$(tm_shell_quote tm_tunnel_stop_exec "${req[name]}")" \
       tm_tunnel_start_exec "${req[name]}"
-  else
-    tm_plan_add "Leave ${req[name]} down until a peer public key is installed" \
-      "$(tm_shell_quote tm_noop)" \
-      tm_noop
   fi
   tm_require_change_privileges
-  local status=0
   tm_with_lock tm_plan_apply || status=$?
-  if [[ "$status" -eq 0 && "${req[type]}" == "wireguard" && "${TM_DRY_RUN:-0}" != "1" ]]; then
-    tm_print_public_key "${req[name]}" || true
-  fi
   return "$status"
 }
 
@@ -357,71 +312,11 @@ tm_tunnel_apply_peer_file() {
 }
 
 tm_action_tunnel_set_peer() {
-  local -A opt=()
-  local -A row=()
-  local name peer
-  tm_opts_parse opt "$@"
-  tm_opts_bind_flags opt
-  tm_opt_require opt name name
-  name="${opt[name]}"
-  peer=$(tm_opt_get opt peer_public_key)
-  if [[ -n "${opt[peer_file]:-}" ]]; then
-    local -A peerfile=()
-    tm_kv_read "${opt[peer_file]}" peerfile || tm_die "Peer file is invalid."
-    peer="${peerfile[TM_PEER_PUBLIC_KEY]:-}"
-  fi
-  peer=$(tm_normalize_wg_key "$peer") || return 1
-  tm_tunnel_load "$name" row || tm_die "Tunnel ${name} was not found."
-  [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]] || tm_die "set-peer applies to WireGuard tunnels."
-  tm_plan_require_clear_journal
-  tm_plan_reset
-  tm_plan_add "Store the peer public key and start ${name}" \
-    "$(tm_shell_quote tm_tunnel_set_peer_undo "$name")" \
-    tm_tunnel_set_peer_exec "$name" "$peer"
-  tm_require_change_privileges
-  tm_with_lock tm_plan_apply
+  tm_die "WireGuard has been removed. Peer keys are not used."
 }
 
-tm_tunnel_set_peer_exec() {
-  local name="$1"
-  local peer="$2"
-  local -A row=()
-  local iface mark
-  tm_tunnel_load "$name" row || return 1
-  tm_valid_wg_key "$peer" || return 1
-  tm_snapshot_file "$(tm_tunnel_file "$name")" || return 1
-  iface=$(tm_tunnel_iface "$name")
-  mark="${TM_VAR}/peer-${name}.mark"
-  mkdir -p -- "$TM_VAR" || return 1
-  if tm_iface_exists "$iface"; then
-    printf 'kept\n' >"$mark"
-  else
-    printf 'started\n' >"$mark"
-  fi
-  chmod 0600 "$mark" || true
-  tm_tunnel_state_write_exec "$name" wireguard active \
-    "${row[TM_LOCAL_PUBLIC_IP]}" "${row[TM_REMOTE_PUBLIC_IP]}" \
-    "${row[TM_LOCAL_TUNNEL_IP]}" "${row[TM_REMOTE_TUNNEL_IP]}" "${row[TM_TUNNEL_CIDR]}" \
-    "${row[TM_LISTEN_PORT]}" "${row[TM_ENDPOINT_PORT]}" "${row[TM_MTU]}" "${row[TM_KEEPALIVE]}" \
-    "${row[TM_WAN_IFACE]}" "$peer" no || return 1
-  tm_tunnel_start_exec "$name"
-}
-
-tm_tunnel_set_peer_undo() {
-  local name="$1"
-  local mark="${TM_VAR}/peer-${name}.mark"
-  local mode="started"
-  if [[ -f "$mark" ]]; then
-    mode=$(tr -d '[:space:]' <"$mark")
-  fi
-  tm_tunnel_stop_exec "$name" || return 1
-  tm_restore_snapshot "$(tm_tunnel_file "$name")" || return 1
-  if [[ "$mode" == "kept" ]]; then
-    tm_tunnel_start_exec "$name" || return 1
-  fi
-  if [[ -f "$mark" ]]; then
-    tm_safe_rm "$mark" || return 1
-  fi
+tm_action_tunnel_keygen() {
+  tm_die "WireGuard has been removed. Tunnel Manager no longer generates keys."
 }
 
 tm_tunnel_ensure_exec() {
@@ -471,8 +366,15 @@ tm_tunnel_remove_files_exec() {
     tm_snapshot_file "$conf" || return 1
   fi
   tm_tunnel_stop_exec "$name" || return 1
-  tm_wg_conf_undo "$name" || return 1
-  tm_wg_key_undo "$name" || return 1
+  if [[ -f "$conf" ]]; then
+    tm_safe_rm "$conf" || return 1
+  fi
+  if [[ -f "$(tm_key_file "$name")" ]]; then
+    tm_safe_rm "$(tm_key_file "$name")" || return 1
+  fi
+  if [[ -f "$(tm_pub_file "$name")" ]]; then
+    tm_safe_rm "$(tm_pub_file "$name")" || return 1
+  fi
   tm_tunnel_state_undo "$name" || return 1
 }
 
@@ -633,9 +535,6 @@ tm_action_tunnel_export() {
     printf 'TM_PEER_TUNNEL_IP=%s\n' "${row[TM_LOCAL_TUNNEL_IP]}"
     printf 'TM_PEER_TUNNEL_TYPE=%s\n' "${row[TM_TUNNEL_TYPE]}"
     printf 'TM_PEER_CIDR=%s\n' "${row[TM_TUNNEL_CIDR]}"
-    if [[ -n "${row[TM_LISTEN_PORT]:-}" && "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]]; then
-      printf 'TM_PEER_LISTEN_PORT=%s\n' "${row[TM_LISTEN_PORT]}"
-    fi
     if [[ -n "$pub" ]]; then
       printf 'TM_PEER_PUBLIC_KEY=%s\n' "$pub"
     fi
@@ -652,20 +551,21 @@ tm_action_tunnel_test() {
   tm_opt_require opt name name
   name="${opt[name]}"
   tm_tunnel_load "$name" row || tm_die "Tunnel ${name} was not found."
+  if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" ]]; then
+    tm_error "[FAIL] WireGuard has been removed. Delete tunnel ${name}."
+    return 1
+  fi
+  if [[ "${row[TM_TUNNEL_TYPE]}" == "forward" ]]; then
+    tm_info "[PASS] Port forward ${name} has no tunnel interface."
+    tm_info "Saved forwards use ${row[TM_LOCAL_TUNNEL_IP]} -> ${row[TM_REMOTE_TUNNEL_IP]}."
+    return 0
+  fi
   iface=$(tm_tunnel_iface "$name")
   if tm_iface_exists "$iface"; then
     tm_info "[PASS] Interface ${iface} exists."
   else
     tm_error "[FAIL] Interface ${iface} is not present."
     ok=1
-  fi
-  if [[ "${row[TM_TUNNEL_TYPE]}" == "wireguard" && -f "$(tm_wg_conf_file "$name")" ]]; then
-    if tm_wg_assert_conf_safe "$(tm_wg_conf_file "$name")"; then
-      tm_info "[PASS] WireGuard config keeps Table = off and does not use a default route."
-    else
-      tm_error "[FAIL] WireGuard config failed the safety check."
-      ok=1
-    fi
   fi
   if tm_cmd_available ping; then
     local -a ping_args=(ping -c 3 -W 2)
@@ -685,19 +585,3 @@ tm_action_tunnel_test() {
   return "$ok"
 }
 
-tm_action_tunnel_keygen() {
-  local -A opt=()
-  local name
-  tm_opts_parse opt "$@"
-  tm_opts_bind_flags opt
-  tm_opt_require opt name name
-  name="${opt[name]}"
-  tm_valid_tunnel_name "$name" || tm_die "Invalid tunnel name."
-  tm_plan_require_clear_journal
-  tm_plan_reset
-  tm_plan_add "Generate WireGuard keys for ${name}" \
-    "$(tm_shell_quote tm_wg_key_undo "$name")" \
-    tm_wg_keygen_exec "$name"
-  tm_require_change_privileges
-  tm_with_lock tm_plan_apply
-}
