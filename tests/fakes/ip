@@ -67,6 +67,10 @@ case "${1:-}" in
         ;;
       add)
         name="${4:-}"
+        if [[ -f "${ROOT}/ip.fail-add" ]] && grep -qx -- "$name" "${ROOT}/ip.fail-add"; then
+          printf '%s\n' "RTNETLINK answers: File exists" >&2
+          exit 2
+        fi
         printf '%s\n' "$name" >>"$LINKS"
         exit 0
         ;;
@@ -77,6 +81,8 @@ case "${1:-}" in
         name="${4:-}"
         grep -v "^${name}$" "$LINKS" >"${LINKS}.tmp" || true
         mv -f "${LINKS}.tmp" "$LINKS"
+        grep -v "^${name} " "$ADDRS" >"${ADDRS}.tmp" || true
+        mv -f "${ADDRS}.tmp" "$ADDRS"
         exit 0
         ;;
       *)

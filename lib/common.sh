@@ -13,7 +13,7 @@ if [[ -n "${TM_COMMON_LOADED:-}" ]]; then
 fi
 TM_COMMON_LOADED=1
 
-TM_VERSION="2.0.0"
+TM_VERSION="2.0.1"
 
 tm_version() {
   printf '%s\n' "$TM_VERSION"

@@ -157,7 +157,8 @@ tm_iptables_rule_is_safe() {
         [[ "$i" -lt "$n" ]] || return 1
         saddr="${args[$i]}"
         [[ "$saddr" == */32 ]] && saddr="${saddr%/32}"
-        tm_valid_ipv4 "$saddr" || return 1
+        [[ "$saddr" == */128 ]] && saddr="${saddr%/128}"
+        tm_valid_ipv4 "$saddr" || tm_valid_ipv6 "$saddr" || return 1
         ;;
       --dport)
         i=$((i + 1))
@@ -404,6 +405,7 @@ tm_nft_rule_tail_is_safe() {
   local chain="$1"
   shift
   local comment="" proto_seen=0 gre_seen=0 iif_seen=0 dport="" to_value="" jump=""
+  local addr_family=4
   local -a args=("$@")
   local i=0 token
   while [[ "$i" -lt "${#args[@]}" ]]; do
@@ -423,10 +425,18 @@ tm_nft_rule_tail_is_safe() {
         gre_seen=1
         ;;
       ip)
+        addr_family=4
+        ;;
+      ip6)
+        addr_family=6
         ;;
       daddr|saddr)
         i=$((i + 1))
-        tm_valid_ipv4 "${args[$i]:-}" || return 1
+        if [[ "$addr_family" == "6" ]]; then
+          tm_valid_ipv6 "${args[$i]:-}" || return 1
+        else
+          tm_valid_ipv4 "${args[$i]:-}" || return 1
+        fi
         ;;
       dport|sport)
         i=$((i + 1))
@@ -591,8 +601,13 @@ tm_ip_prefix_ok() {
 tm_ip_link_add_is_safe() {
   local -a args=("$@")
   local family
-  # name IFACE type gre|ip6gre local IP remote IP ttl N
-  [[ "${#args[@]}" -eq 10 ]] || return 1
+  # name IFACE type gre|ip6gre local IP remote IP ttl N [key K]
+  if [[ "${#args[@]}" -eq 12 ]]; then
+    [[ "${args[10]}" == "key" ]] || return 1
+    tm_valid_gre_key "${args[11]}" || return 1
+  else
+    [[ "${#args[@]}" -eq 10 ]] || return 1
+  fi
   [[ "${args[0]}" == "name" && "${args[2]}" == "type" ]] || return 1
   tm_valid_tunnel_iface "${args[1]}" || return 1
   [[ "${args[4]}" == "local" && "${args[6]}" == "remote" && "${args[8]}" == "ttl" ]] || return 1

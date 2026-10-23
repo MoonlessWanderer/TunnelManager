@@ -394,6 +394,75 @@ tm_ip_same_subnet() {
   fi
 }
 
+tm_ip_subnets_overlap() {
+  local left="$1"
+  local left_prefix="$2"
+  local right="$3"
+  local right_prefix="$4"
+  local left_family right_family prefix
+  left_family=$(tm_ip_family "$left") || return 1
+  right_family=$(tm_ip_family "$right") || return 1
+  [[ "$left_family" == "$right_family" ]] || return 1
+  [[ "$left_prefix" =~ ^[0-9]{1,3}$ && "$right_prefix" =~ ^[0-9]{1,3}$ ]] || return 1
+  prefix=$((10#$left_prefix))
+  if ((10#$right_prefix < prefix)); then
+    prefix=$((10#$right_prefix))
+  fi
+  if [[ "$left_family" == "4" ]]; then
+    ((prefix <= 32)) || return 1
+    [[ "$(tm_ipv4_network "$left" "$prefix")" == "$(tm_ipv4_network "$right" "$prefix")" ]]
+  else
+    ((prefix <= 128)) || return 1
+    [[ "$(tm_ipv6_network "$left" "$prefix")" == "$(tm_ipv6_network "$right" "$prefix")" ]]
+  fi
+}
+
+# Networks of /24 or narrower (/64 for IPv6) clash on any overlap. A wider
+# network clashes only when its own address falls inside the inner subnet,
+# because the narrower tunnel route already wins for the rest of it.
+tm_inner_clashes_with() {
+  local addr="$1"
+  local prefix="$2"
+  local local_tun="$3"
+  local cidr="$4"
+  local narrow=24
+  [[ "$prefix" =~ ^[0-9]{1,3}$ ]] || return 1
+  if tm_valid_ipv6 "$addr"; then
+    narrow=64
+  fi
+  if ((10#$prefix >= narrow)); then
+    tm_ip_subnets_overlap "$addr" "$prefix" "$local_tun" "$cidr"
+  else
+    tm_ip_subnets_overlap "$addr" "$cidr" "$local_tun" "$cidr"
+  fi
+}
+
+tm_valid_gre_key() {
+  [[ "$1" =~ ^[1-9][0-9]{0,9}$ ]] || return 1
+  (($1 <= 4294967295))
+}
+
+# Both ends derive the same key from the inner network, and inner subnets
+# never overlap on one host, so keys stay unique there.
+tm_gre_key_for() {
+  local ip="$1"
+  local prefix="$2"
+  local net sum key a b c d
+  if tm_valid_ipv4 "$ip"; then
+    net=$(tm_ipv4_network "$ip" "$prefix") || return 1
+    IFS='.' read -r a b c d <<<"$net"
+    key=$(((a << 24) | (b << 16) | (c << 8) | d))
+  else
+    net=$(tm_ipv6_network "$ip" "$prefix") || return 1
+    sum=$(printf '%s/%s' "$net" "$prefix" | cksum)
+    key=${sum%% *}
+  fi
+  if ((key == 0)); then
+    key=1
+  fi
+  printf '%s\n' "$key"
+}
+
 tm_public_pair_ok() {
   local left_family right_family
   left_family=$(tm_ip_family "$1") || return 1

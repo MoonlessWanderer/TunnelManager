@@ -16,6 +16,7 @@ TM_PLAN_LOADED=1
 TM_PLAN_DESC=()
 TM_PLAN_CMD=()
 TM_PLAN_UNDO=()
+TM_PLAN_STATUS=0
 
 tm_plan_reset() {
   TM_PLAN_DESC=()
@@ -151,26 +152,42 @@ tm_plan_show() {
   tm_info "Existing firewall rules are not flushed."
 }
 
-tm_plan_apply() {
-  local i
+# Returns 0 when the plan should run. Otherwise TM_PLAN_STATUS holds the
+# status for the caller: 0 for an empty plan or dry-run, 2 when declined.
+tm_plan_confirm() {
+  TM_PLAN_STATUS=0
   tm_plan_show
   if [[ "${#TM_PLAN_DESC[@]}" -eq 0 ]]; then
-    return 0
+    return 1
   fi
   if [[ "${TM_DRY_RUN:-0}" == "1" ]]; then
     if tm_journal_exists; then
       tm_warn "A rollback journal exists. Apply will refuse to run until rollback completes."
     fi
     tm_info "Dry-run only. No changes were made."
-    return 0
+    return 1
   fi
   if tm_journal_exists; then
     tm_die "A rollback journal already exists. Run: tunnel-manager rollback"
   fi
   if ! tm_confirm "Apply these changes?"; then
     tm_info "Aborted. No changes were made."
-    return 2
+    TM_PLAN_STATUS=2
+    return 1
   fi
+  return 0
+}
+
+tm_plan_apply() {
+  tm_plan_confirm || return "$TM_PLAN_STATUS"
+  tm_plan_run || return $?
+  tm_info "Changes applied."
+}
+
+# A failed step undoes the earlier steps of this plan only. The journal stays
+# behind when that undo fails.
+tm_plan_run() {
+  local i
   for i in "${!TM_PLAN_DESC[@]}"; do
     tm_info "Applying: ${TM_PLAN_DESC[$i]}"
     tm_journal_append "${TM_PLAN_UNDO[$i]}"
@@ -184,8 +201,6 @@ tm_plan_apply() {
     fi
   done
   tm_journal_clear
-  tm_info "Changes applied."
-  return 0
 }
 
 tm_plan_require_clear_journal() {

@@ -34,7 +34,10 @@ the packages it uses. From a checkout, run `sudo ./install.sh` instead.
 5. On the foreign server, choose Configure a New Tunnel, then Foreign, and
    paste that command. A plain port forward needs nothing on the foreign side.
 
-Saved tunnels and ports come back after a reboot.
+Saved tunnels and ports come back after a reboot. Run setup once per tunnel:
+one Iran server can reach several foreign servers, one foreign server can
+serve several Iran servers, and two servers can share several GRE tunnels.
+Use the same version on both servers.
 
 ## Menu
 
@@ -55,6 +58,8 @@ Saved tunnels and ports come back after a reboot.
 - Rules live in their own `TM_*` chains, or the `inet tunnel_manager` table.
   iptables and nftables are never mixed.
 - Ports that match SSH are refused, and so are `0.0.0.0/0` and `::/0`.
+- Ports, inner subnets, and GRE links that other tools already use are left
+  alone. See [Other tunnel tools](docs/OPERATIONS.md#other-tunnel-tools-on-the-same-server).
 
 More in [docs/OPERATIONS.md](docs/OPERATIONS.md),
 [docs/SECURITY.md](docs/SECURITY.md), and

@@ -45,7 +45,7 @@ Usage:
   tunnel-manager tunnel create --name NAME --type forward|gre \\
       --local-public-ip IP --remote-public-ip IP \\
       --local-tunnel-ip IP --remote-tunnel-ip IP --wan-iface IFACE \\
-      [--cidr 30] [--mtu N]
+      [--cidr 30] [--mtu N] [--key N]
   tunnel-manager tunnel up|down|restart|test|show --name NAME
   tunnel-manager tunnel list
   tunnel-manager tunnel delete --name NAME [--yes]

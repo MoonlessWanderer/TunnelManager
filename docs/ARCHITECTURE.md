@@ -26,6 +26,34 @@ endpoints. The inner address is IPv4 `/24` through `/31`, or IPv6 `/64`
 through `/127`. The tool never runs
 `ip route add`, `replace`, or `del`.
 
+Each GRE link carries a key (`TM_GRE_KEY`). For IPv4 it is the inner network
+address as a 32-bit number; for IPv6 it is the `cksum` of `network/prefix`.
+0 becomes 1. Both ends derive the same key, and the key differs between the
+tunnels of one host because their inner subnets never overlap. The kernel
+keeps one GRE link per local address, remote address, and key, so several
+tunnels between the same two servers can coexist, and so can an unkeyed link
+from another tool. The default MTU is 1472 for IPv4 endpoints and 1452 for
+IPv6, which covers the 4-byte key.
+
+A new GRE tunnel is refused when:
+
+- another saved GRE tunnel has the same public pair and key;
+- its inner subnet overlaps another saved tunnel's subnet, because the kernel
+  would route that traffic through whichever interface came first;
+- its inner subnet clashes with an address on an interface that Tunnel
+  Manager does not own. A host prefix of /24 or longer (/64 for IPv6) clashes
+  on any overlap. A wider host prefix clashes only when its address lies
+  inside the new subnet, so a /30 inside a site-wide /8 stays allowed.
+
+The Iran menu suggests a /30 inside `10.200.0.0/16`. The start block is
+seeded from both public addresses, and the search moves past blocks that
+would be refused. `quick` saves a GRE tunnel under the next free name when
+the name from the setup command is already used on that server.
+
+The setup command is `v2:TYPE:NAME:IRAN_IP:FOREIGN_IP:IRAN_TUN:FOREIGN_TUN:CIDR:KEY`.
+A plain port forward uses key 0. Any other version is refused with a message
+to update both servers.
+
 `apply` records whether a tunnel interface was already up. Rollback stops
 only a tunnel that this run started.
 
@@ -33,6 +61,13 @@ only a tunnel that this run started.
 
 TCP and UDP use the same firewall NAT path. Both are IPv4 only. The tunnel
 itself may still be IPv6. A saved forward sets `net.ipv4.ip_forward=1`.
+
+`forward add`, `forward edit` with a new protocol or port, and setup refuse
+a listen port that is already taken outside Tunnel Manager. Taken means `ss`
+shows a listener on a non-loopback address, or `iptables -t nat -S` or
+`nft list ruleset` shows a DNAT or REDIRECT rule for that port without a
+`tm:` comment. The jumps into Tunnel Manager chains sit at position 1, so
+such a port would otherwise be taken over silently.
 
 ## Firewall
 
@@ -63,7 +98,14 @@ toward its public default route. No route is added when the destination is
 outside the tunnel subnet; the plan warns that the destination must already
 be reachable.
 
-`net.ipv4.ip_forward` is raised while any saved forward exists.
+The GRE allow rule in `TM_INPUT` or the nft input chain matches the WAN
+interface, the peer public address, and protocol GRE. GRE from other peers
+falls through to the rules of whatever else manages the host.
+
+`net.ipv4.ip_forward` is raised while any saved forward exists. When the last
+one goes away, the value from before is restored, unless a file under
+`/etc/sysctl.conf`, `/etc/sysctl.d`, `/run/sysctl.d`, `/usr/local/lib/sysctl.d`,
+or `/usr/lib/sysctl.d` turns forwarding on; then it stays on.
 
 ## Plans and rollback
 
@@ -73,6 +115,13 @@ route is unchanged and the firewall is not flushed. Dry-run returns before
 any command runs. Otherwise the operator confirms, each undo is appended to
 `/var/lib/tunnel-manager/rollback.journal`, and the command runs. On failure
 the journal is replayed in reverse and rewritten after every successful undo.
+
+`apply` and `down` show one plan and ask once. They then run each tunnel, each
+forward, and the final sysctl step as a separate plan through `tm_plan_run`.
+A failed item is rolled back on its own. The other items keep their changes,
+and the command exits 4 with the failed items named. On `apply`, the forwards
+of a tunnel that did not start are skipped. If a rollback fails, the run
+stops and the journal is kept.
 
 Commands are quoted with `printf %q` and replayed into an argument array.
 The array must name a `tm_*` function or an allowlisted external command.

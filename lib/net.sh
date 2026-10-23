@@ -333,8 +333,35 @@ tm_sysctl_forward_needed() {
   tm_any_forward
 }
 
+# Prints the first sysctl file, other than ours, that turns IPv4 forwarding on.
+tm_sysctl_forward_owner() {
+  local path file line
+  local -a paths=() files=()
+  IFS=' ' read -r -a paths <<<"$TM_SYSCTL_SCAN"
+  for path in "${paths[@]}"; do
+    if [[ -d "$path" ]]; then
+      files+=("$path"/*.conf)
+    elif [[ -f "$path" ]]; then
+      files+=("$path")
+    fi
+  done
+  for file in "${files[@]}"; do
+    [[ -f "$file" && "$file" != "$TM_SYSCTL_FILE" ]] || continue
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%%#*}"
+      line="${line%%;*}"
+      line="${line//[[:space:]]/}"
+      if [[ "$line" == "net.ipv4.ip_forward=1" || "$line" == "net/ipv4/ip_forward=1" ]]; then
+        printf '%s\n' "$file"
+        return 0
+      fi
+    done <"$file"
+  done
+  return 1
+}
+
 tm_sysctl_sync_exec() {
-  local current="" status="missing" prev="" need=0
+  local current="" status="missing" prev="" need=0 owner=""
   local prev_file="${TM_VAR}/ip_forward.prev"
   if tm_sysctl_forward_needed; then
     need=1
@@ -371,7 +398,11 @@ tm_sysctl_sync_exec() {
   if [[ -f "$prev_file" ]]; then
     prev=$(tr -d '[:space:]' <"$prev_file")
     if [[ "$prev" == "0" ]]; then
-      tm_must sysctl -w net.ipv4.ip_forward=0 || return 1
+      if owner=$(tm_sysctl_forward_owner); then
+        tm_info "IPv4 forwarding stays on because ${owner} turns it on."
+      else
+        tm_must sysctl -w net.ipv4.ip_forward=0 || return 1
+      fi
     fi
     tm_safe_rm "$prev_file" || return 1
   fi

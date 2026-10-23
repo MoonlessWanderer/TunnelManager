@@ -28,9 +28,16 @@ else
 fi
 saved_keys=$(sed -n 's/=.*//p' "$(tm_tunnel_file edge)" | tr '\n' ' ')
 tm_expect_eq "gre state keys" "$saved_keys" \
-  "TM_TUNNEL_NAME TM_TUNNEL_TYPE TM_TUNNEL_STATE TM_LOCAL_PUBLIC_IP TM_REMOTE_PUBLIC_IP TM_LOCAL_TUNNEL_IP TM_REMOTE_TUNNEL_IP TM_TUNNEL_CIDR TM_MTU TM_WAN_IFACE "
-if grep -q -- '-A TM_INPUT -i eth0 -p gre -m comment --comment tm:gre:edge:input -j ACCEPT' "${TM_FAKE_ROOT}/iptables.log"; then
-  tm_pass "gre input allow is installed"
+  "TM_TUNNEL_NAME TM_TUNNEL_TYPE TM_TUNNEL_STATE TM_LOCAL_PUBLIC_IP TM_REMOTE_PUBLIC_IP TM_LOCAL_TUNNEL_IP TM_REMOTE_TUNNEL_IP TM_TUNNEL_CIDR TM_MTU TM_WAN_IFACE TM_GRE_KEY "
+tm_expect_eq "gre key comes from the inner network" "$(sed -n 's/^TM_GRE_KEY=//p' "$(tm_tunnel_file edge)")" "180879360"
+tm_expect_eq "gre MTU leaves room for the key" "$(sed -n 's/^TM_MTU=//p' "$(tm_tunnel_file edge)")" "1472"
+if grep -q 'link add name tm-edge type gre local 203.0.113.10 remote 203.0.113.20 ttl 255 key 180879360' "${TM_FAKE_ROOT}/ip.log"; then
+  tm_pass "gre link is created with its key"
+else
+  tm_fail "gre link was created without its key"
+fi
+if grep -q -- '-A TM_INPUT -i eth0 -s 203.0.113.20 -p gre -m comment --comment tm:gre:edge:input -j ACCEPT' "${TM_FAKE_ROOT}/iptables.log"; then
+  tm_pass "gre input allow is installed for the peer only"
 else
   tm_fail "gre input allow was not installed"
 fi
@@ -93,7 +100,7 @@ links_after=$(grep -c '^tm-edge$' "${TM_FAKE_ROOT}/ip.links" || true)
 tm_expect_eq "existing tunnel stays up after rollback" "$links_before" "$links_after"
 
 text=$(TM_DRY_RUN=1 tm_action_tunnel_create --name gre1 --type gre \
-  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
+  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.21 \
   --local-tunnel-ip 10.200.0.5 --remote-tunnel-ip 10.200.0.6 \
   --wan-iface eth0 --dry-run 2>&1 || true)
 if [[ "$text" != *"no encryption"* && "$text" != *"GRE is not encrypted"* && "$text" == *"default route is not modified"* && "$text" == *"not flushed"* && "$text" == *"Dry-run"* ]]; then
@@ -163,7 +170,7 @@ tm_expect_ok "disabled bbr stays off" tm_action_bbr_disable --yes
 printf '%s\n' 'eth0 203.0.113.31/32' >>"${TM_FAKE_ROOT}/ip.addrs"
 set +e
 quick_text=$(tm_action_quick --dry-run --token \
-  'v1:gre:link:203.0.113.10:203.0.113.31:10.200.0.1:10.200.0.2:30' 2>&1)
+  'v2:gre:link:203.0.113.10:203.0.113.31:10.200.1.1:10.200.1.2:30:180879616' 2>&1)
 set -e
 TM_DRY_RUN=0
 if [[ "$quick_text" == *"Dry-run"* && "$quick_text" == *"Start gre"* ]] \
@@ -174,7 +181,7 @@ else
 fi
 set +e
 forward_text=$(tm_action_quick --token \
-  'v1:forward:fwd:203.0.113.10:203.0.113.31:203.0.113.10:203.0.113.31:32' 2>&1)
+  'v2:forward:fwd:203.0.113.10:203.0.113.31:203.0.113.10:203.0.113.31:32:0' 2>&1)
 set -e
 if [[ "$forward_text" == *"No tunnel is created"* ]]; then
   tm_pass "plain forward needs no foreign tunnel"

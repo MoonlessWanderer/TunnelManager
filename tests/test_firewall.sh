@@ -126,9 +126,9 @@ if grep -q "tcp dport 443" "${TM_FAKE_ROOT}/nft.log"; then
 else
   tm_fail "nft tcp DNAT was not installed"
 fi
-tm_expect_ok "nft gre input allow" tm_fw_input_apply_exec edge eth0 4
-if grep -q "add rule inet tunnel_manager input iifname eth0 meta l4proto gre accept comment tm:gre:edge:input" "${TM_FAKE_ROOT}/nft.log"; then
-  tm_pass "nft gre input allow uses meta l4proto"
+tm_expect_ok "nft gre input allow" tm_fw_input_apply_exec edge eth0 203.0.113.20 4
+if grep -q "add rule inet tunnel_manager input iifname eth0 ip saddr 203.0.113.20 meta l4proto gre accept comment tm:gre:edge:input" "${TM_FAKE_ROOT}/nft.log"; then
+  tm_pass "nft gre input allow accepts the peer only"
 else
   tm_fail "nft gre input allow was not installed"
 fi

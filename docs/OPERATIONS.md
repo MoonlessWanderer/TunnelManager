@@ -11,9 +11,9 @@ Choose Configure a New Tunnel, then Iran. The detected address is the default;
 press Enter to keep it. Enter the foreign server's IPv4 address, then choose
 plain port forward or GRE.
 
-For GRE, the inner defaults are `10.200.0.1` on Iran and `10.200.0.2` on the
-foreign server, prefix 30. Press Enter to accept a default. Then enter TCP
-ports, one per line:
+For GRE, the menu suggests a free inner pair from `10.200.0.0/16`, prefix 30:
+the first address on Iran and the second on the foreign server. Press Enter
+to accept a default. Then enter TCP ports, one per line:
 
 ```text
 443
@@ -29,8 +29,11 @@ The menu prints one command. Run that command on the foreign server. It looks
 like:
 
 ```bash
-sudo tunnel-manager quick v1:gre:edge:203.0.113.10:203.0.113.20:10.200.0.1:10.200.0.2:30
+sudo tunnel-manager quick v2:gre:edge:203.0.113.10:203.0.113.20:10.200.0.1:10.200.0.2:30:180879360
 ```
+
+The last field is the GRE key. Both servers need the same Tunnel Manager
+version; a command from another version is refused with a message to update.
 
 A plain port forward does not need a tunnel on the foreign server. The service
 there must already listen on the destination port.
@@ -62,6 +65,51 @@ Update the installed program from the menu or with:
 ```bash
 sudo tunnel-manager update
 ```
+
+## More than one tunnel
+
+These layouts work:
+
+- One Iran server to one foreign server.
+- One Iran server to several foreign servers. Run Iran setup once per foreign
+  server.
+- Several Iran servers to one foreign server. Paste each Iran command on the
+  foreign server.
+- Several GRE tunnels between the same two servers. Iran setup says the
+  servers are already connected and continues. To only forward more ports,
+  open Manage Tunnels and add them to the existing tunnel instead.
+
+Each GRE tunnel has its own inner subnet and a GRE key. The key is the inner
+network as a number, so both ends agree on it and it differs between tunnels
+on one server. The kernel tells tunnels between the same two addresses apart
+by that key. The default MTU is 1472 for IPv4 endpoints and 1452 for IPv6,
+which leaves room for the key.
+
+- The Iran menu suggests a different free subnet for each new GRE tunnel. An
+  inner subnet that overlaps another saved tunnel is refused.
+- On the foreign server, `quick` refuses a setup command that was already
+  applied there. It also refuses an inner subnet that another tunnel there
+  uses. In that case, delete the new tunnel on Iran and set it up again with
+  other inner addresses. If the tunnel name is taken, the next free name is
+  used, such as `edge2`.
+- `apply` and `down` handle each tunnel and forward on its own. One that
+  fails is rolled back and named in the error, and the rest stay applied.
+  Forwards of a tunnel that did not start are skipped.
+
+## Other tunnel tools on the same server
+
+Tunnel Manager only touches `tm-*` interfaces, its own firewall chains or
+table, and its own sysctl file. It also avoids these clashes with other tools:
+
+- An inner subnet that overlaps an address on another interface is refused,
+  and the menu does not suggest it.
+- Its GRE links carry a key. A GRE link from another tool between the same
+  two addresses without a key keeps working.
+- The GRE allow rule accepts GRE from the peer's public address only.
+- A listen port is refused when a service already listens on it on a public
+  address, or when another tool's DNAT or REDIRECT rule already takes it.
+- When the last forward goes away, IPv4 forwarding is left on if another
+  sysctl file turns it on.
 
 ## Forwards
 
@@ -131,11 +179,11 @@ have inspected it. A second apply is refused while the journal exists.
 
 ```bash
 sudo tunnel-manager --dry-run tunnel create --name gre1 --type gre \
-  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
+  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.30 \
   --local-tunnel-ip 10.200.0.5 --remote-tunnel-ip 10.200.0.6 \
   --wan-iface eth0
 sudo tunnel-manager tunnel create --name gre1 --type gre \
-  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.20 \
+  --local-public-ip 203.0.113.10 --remote-public-ip 203.0.113.30 \
   --local-tunnel-ip 10.200.0.5 --remote-tunnel-ip 10.200.0.6 \
   --wan-iface eth0
 ```
@@ -153,7 +201,8 @@ Read the plan before confirming.
      finishes the list.
    - Foreign asks for the setup command printed by Iran.
 2. Manage Tunnels
-   - Lists saved tunnels. If none are saved, it says so.
+   - Lists saved tunnels with their type and remote server. If none are
+     saved, it says so.
    - Choosing a tunnel offers details, test, TCP ports, and delete. GRE also
      offers restart.
    - Maintenance has status, troubleshoot, backup, restore, apply, dry-run, and rollback.
@@ -169,8 +218,9 @@ Read the plan before confirming.
 ## Reboot
 
 `tunnel-manager-apply.service` runs `apply --yes` on boot. That reconciles
-saved state. It does not prompt. An interface that is already up is left up if
-a later step fails.
+saved state. It does not prompt. Each tunnel and forward is applied on its
+own, so one that fails does not take the others down. An interface that is
+already up stays up.
 
 Menu setup, adding ports from the menu, and `quick` enable the unit when they
 save a tunnel. The setup summary says so before anything runs. Tunnels and

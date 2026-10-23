@@ -407,9 +407,10 @@ tm_iptables_l4_delete_exec() {
 tm_iptables_input_apply_exec() {
   local name="$1"
   local iface="$2"
+  local remote="$3"
   tm_iptables_ensure_base || return 1
   tm_iptables_add_if_missing \
-    iptables -t filter -A TM_INPUT -i "$iface" -p gre \
+    iptables -t filter -A TM_INPUT -i "$iface" -s "$remote" -p gre \
     -m comment --comment "$(tm_fw_comment "gre:${name}:input")" -j ACCEPT
 }
 
@@ -534,12 +535,18 @@ tm_nft_l4_delete_exec() {
 tm_nft_input_apply_exec() {
   local name="$1"
   local iface="$2"
+  local remote="$3"
+  local match=ip
   tm_nft_ensure_base || return 1
   if [[ "${TM_NFT_FILTER_OK:-0}" != "1" ]]; then
     tm_warn "Skipped the GRE input allow because a filter hook is owned by another firewall."
     return 0
   fi
-  tm_nft_add_rule input "$(tm_fw_comment "gre:${name}:input")" iifname "$iface" meta l4proto gre accept
+  if tm_valid_ipv6 "$remote"; then
+    match=ip6
+  fi
+  tm_nft_add_rule input "$(tm_fw_comment "gre:${name}:input")" \
+    iifname "$iface" "$match" saddr "$remote" meta l4proto gre accept
 }
 
 tm_nft_input_delete_exec() {
@@ -626,9 +633,10 @@ tm_ip6tables_input_gc() {
 tm_ip6tables_input_apply_exec() {
   local name="$1"
   local iface="$2"
+  local remote="$3"
   tm_ip6tables_input_ensure || return 1
   tm_iptables_add_if_missing \
-    ip6tables -t filter -A TM_INPUT -i "$iface" -p gre \
+    ip6tables -t filter -A TM_INPUT -i "$iface" -s "$remote" -p gre \
     -m comment --comment "$(tm_fw_comment "gre:${name}:input")" -j ACCEPT
 }
 
@@ -638,19 +646,23 @@ tm_ip6tables_input_delete_exec() {
   tm_ip6tables_input_gc || return 1
 }
 
+# Accepts GRE from the peer only, so GRE for other tools on this host keeps
+# whatever policy they set.
 tm_fw_input_apply_exec() {
   local name="$1"
   local iface="$2"
-  local family="${3:-4}"
+  local remote="$3"
+  local family="${4:-4}"
   local backend
+  tm_ip_is_unicast_host "$remote" || return 1
   backend=$(tm_fw_active_backend) || return 1
   if [[ "$family" == "6" && "$backend" == "iptables" ]]; then
-    tm_ip6tables_input_apply_exec "$name" "$iface"
+    tm_ip6tables_input_apply_exec "$name" "$iface" "$remote"
     return $?
   fi
   case "$backend" in
-    iptables) tm_iptables_input_apply_exec "$name" "$iface" ;;
-    nft) tm_nft_input_apply_exec "$name" "$iface" ;;
+    iptables) tm_iptables_input_apply_exec "$name" "$iface" "$remote" ;;
+    nft) tm_nft_input_apply_exec "$name" "$iface" "$remote" ;;
     *) return 1 ;;
   esac
 }

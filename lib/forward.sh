@@ -208,6 +208,106 @@ tm_forward_validate_common() {
   return 0
 }
 
+# Succeeds when a firewall rule line matches PORT through --dport, --dports,
+# or an nft dport value, list, or range.
+tm_fw_line_has_dport() {
+  local line="$1"
+  local port="$2"
+  local value item lo hi i j
+  local -a words=() items=()
+  IFS=$' \t\n' read -r -a words <<<"$line"
+  for ((i = 0; i + 1 < ${#words[@]}; i++)); do
+    case "${words[$i]}" in
+      --dport|--dports|--destination-port|--destination-ports|dport) ;;
+      *) continue ;;
+    esac
+    value="${words[$((i + 1))]}"
+    if [[ "$value" == "{" ]]; then
+      value=""
+      for ((j = i + 2; j < ${#words[@]}; j++)); do
+        [[ "${words[$j]}" != "}" ]] || break
+        value+="${words[$j]}"
+      done
+    fi
+    IFS=',' read -r -a items <<<"$value"
+    for item in "${items[@]}"; do
+      item="${item//-/:}"
+      if [[ "$item" =~ ^([0-9]+):([0-9]+)$ ]]; then
+        lo=${BASH_REMATCH[1]}
+        hi=${BASH_REMATCH[2]}
+        if ((10#$port >= 10#$lo && 10#$port <= 10#$hi)); then
+          return 0
+        fi
+      elif [[ "$item" == "$port" ]]; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+# Succeeds when a DNAT or REDIRECT rule that Tunnel Manager did not make takes
+# this port. Both iptables and nft are read, because either can hook the host.
+tm_fw_foreign_redirect() {
+  local proto="$1"
+  local port="$2"
+  local line table=""
+  while IFS= read -r line; do
+    [[ "$line" == "-A "* && "$line" == *"-p ${proto} "* ]] || continue
+    [[ "$line" == *"-j DNAT"* || "$line" == *"-j REDIRECT"* ]] || continue
+    [[ "$line" != *"--comment tm:"* && "$line" != *'--comment "tm:'* ]] || continue
+    tm_fw_line_has_dport "$line" "$port" && return 0
+  done < <(TM_DRY_RUN=0 tm_run_quiet iptables -t nat -S 2>/dev/null || true)
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^table[[:space:]]+([a-z0-9]+)[[:space:]]+([A-Za-z0-9_-]+) ]]; then
+      table="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+      continue
+    fi
+    [[ "$table" != "inet tunnel_manager" && "$line" != *'comment "tm:'* ]] || continue
+    [[ "$line" == *" dnat "* || "$line" == *" redirect"* ]] || continue
+    [[ "$line" == *"${proto} dport "* || "$line" == *"th dport "* ]] || continue
+    tm_fw_line_has_dport "$line" "$port" && return 0
+  done < <(TM_DRY_RUN=0 tm_run_quiet nft list ruleset 2>/dev/null || true)
+  return 1
+}
+
+# Prints what already takes this port outside Tunnel Manager. A listener on
+# loopback only is ignored, because traffic from the WAN cannot reach it.
+tm_forward_port_user() {
+  local proto="$1"
+  local port="$2"
+  local flag="-t" line local_addr
+  local -a cols=()
+  if [[ "$proto" == "udp" ]]; then
+    flag="-u"
+  fi
+  while IFS= read -r line; do
+    IFS=$' \t\n' read -r -a cols <<<"$line"
+    local_addr="${cols[3]:-}"
+    case "$local_addr" in
+      ""|127.*|"[::1]"*|*%lo:*) continue ;;
+    esac
+    printf '%s\n' "a local ${proto} service on ${local_addr}"
+    return 0
+  done < <(TM_DRY_RUN=0 tm_run_quiet ss -H -l -n "$flag" sport = ":${port}" 2>/dev/null || true)
+  if tm_fw_foreign_redirect "$proto" "$port"; then
+    printf '%s\n' "a NAT rule from another tool"
+    return 0
+  fi
+  return 1
+}
+
+tm_forward_reject_port_user() {
+  local proto="$1"
+  local port="$2"
+  local user
+  if user=$(tm_forward_port_user "$proto" "$port"); then
+    tm_error "Port ${port}/${proto} is already used by ${user}. Choose another port, or stop that first."
+    return 1
+  fi
+  return 0
+}
+
 tm_action_forward_add() {
   local -A opt=()
   local name proto listen_ip listen_port dest_ip dest_port snat ingress source_ip tunnel_ref decision
@@ -244,6 +344,7 @@ tm_action_forward_add() {
   if [[ -f "$(tm_forward_file "$name")" ]]; then
     tm_die "Forward ${name} already exists."
   fi
+  tm_forward_reject_port_user "$proto" "$listen_port" || tm_die "Forward validation failed."
   decision=$(tm_fw_snat_decision "$snat" "$dest_ip" "$source_ip" "$dest_ip") || tm_die "Cannot decide SNAT."
   if [[ "$dest_ip" != "$source_ip" && "$dest_ip" != "${tun[TM_REMOTE_TUNNEL_IP]:-}" ]]; then
     tm_warn "No route will be added for ${dest_ip}. It must already be reachable, usually through the tunnel subnet."
@@ -330,6 +431,9 @@ tm_action_forward_edit() {
   source_ip=$(tm_opt_get opt source_ip "${row[TM_SOURCE_IP]}")
   tunnel_ref=$(tm_opt_get opt tunnel "${row[TM_TUNNEL_REF]:-none}")
   tm_forward_validate_common "$name" "$proto" "$listen_ip" "$listen_port" "$dest_ip" "$dest_port" "$snat" "$ingress" "$source_ip" || tm_die "Forward validation failed."
+  if [[ "$proto" != "${row[TM_FORWARD_PROTO]}" || "$listen_port" != "${row[TM_LISTEN_PORT]}" ]]; then
+    tm_forward_reject_port_user "$proto" "$listen_port" || tm_die "Forward validation failed."
+  fi
   decision=$(tm_fw_snat_decision "$snat" "$dest_ip" "$source_ip" "$dest_ip") || tm_die "Cannot decide SNAT."
   tm_plan_require_clear_journal
   tm_plan_reset

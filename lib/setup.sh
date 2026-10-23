@@ -130,13 +130,14 @@ tm_setup_token() {
   local iran_tun="$5"
   local foreign_tun="$6"
   local cidr="$7"
-  printf 'v1:%s:%s:%s:%s:%s:%s:%s\n' \
-    "$type" "$name" "$iran_ip" "$foreign_ip" "$iran_tun" "$foreign_tun" "$cidr"
+  local key="${8:-0}"
+  printf 'v2:%s:%s:%s:%s:%s:%s:%s:%s\n' \
+    "$type" "$name" "$iran_ip" "$foreign_ip" "$iran_tun" "$foreign_tun" "$cidr" "$key"
 }
 
 tm_setup_extract_token() {
   local text="$1"
-  local pattern='v1:(gre|forward):[a-z][a-z0-9-]{0,11}(:[0-9]{1,3}(\.[0-9]{1,3}){3}){4}:[0-9]{1,3}'
+  local pattern='v2:(gre|forward):[a-z][a-z0-9-]{0,11}(:[0-9]{1,3}(\.[0-9]{1,3}){3}){4}:[0-9]{1,3}:[0-9]{1,10}'
   if [[ "$text" =~ $pattern ]]; then
     printf '%s\n' "${BASH_REMATCH[0]}"
     return 0
@@ -144,13 +145,22 @@ tm_setup_extract_token() {
   return 1
 }
 
+tm_setup_no_token_message() {
+  local text="$1"
+  if [[ "$text" =~ v[0-9]+:(gre|forward): ]]; then
+    printf '%s\n' "This setup command comes from a different Tunnel Manager version. Update both servers, then run setup on Iran again."
+  else
+    printf '%s\n' "That text does not contain a setup command."
+  fi
+}
+
 tm_setup_parse_token() {
   local token="$1"
   local -n _tm_spec=$2
   local -a parts=()
   IFS=':' read -r -a parts <<<"$token"
-  [[ "${#parts[@]}" -eq 8 ]] || return 1
-  [[ "${parts[0]}" == "v1" ]] || return 1
+  [[ "${#parts[@]}" -eq 9 ]] || return 1
+  [[ "${parts[0]}" == "v2" ]] || return 1
   _tm_spec[type]="${parts[1]}"
   _tm_spec[name]="${parts[2]}"
   _tm_spec[iran_ip]="${parts[3]}"
@@ -158,6 +168,7 @@ tm_setup_parse_token() {
   _tm_spec[iran_tun]="${parts[5]}"
   _tm_spec[foreign_tun]="${parts[6]}"
   _tm_spec[cidr]="${parts[7]}"
+  _tm_spec[key]="${parts[8]}"
   tm_valid_tunnel_type "${_tm_spec[type]}" || return 1
   tm_valid_tunnel_name "${_tm_spec[name]}" || return 1
   tm_valid_ipv4 "${_tm_spec[iran_ip]}" || return 1
@@ -167,10 +178,12 @@ tm_setup_parse_token() {
   tm_public_pair_ok "${_tm_spec[iran_ip]}" "${_tm_spec[foreign_ip]}" || return 1
   if [[ "${_tm_spec[type]}" == "gre" ]]; then
     tm_tunnel_pair_ok "${_tm_spec[iran_tun]}" "${_tm_spec[foreign_tun]}" "${_tm_spec[cidr]}" || return 1
+    tm_valid_gre_key "${_tm_spec[key]}" || return 1
   else
     [[ "${_tm_spec[cidr]}" == "32" ]] || return 1
     [[ "${_tm_spec[iran_tun]}" == "${_tm_spec[iran_ip]}" ]] || return 1
     [[ "${_tm_spec[foreign_tun]}" == "${_tm_spec[foreign_ip]}" ]] || return 1
+    [[ "${_tm_spec[key]}" == "0" ]] || return 1
   fi
   return 0
 }
@@ -185,6 +198,92 @@ tm_setup_address_present() {
   return 1
 }
 
+# Prints "ADDR PREFIX MODE" for every network a new inner subnet must avoid:
+# saved GRE tunnels clash on any overlap, host addresses follow
+# tm_inner_clashes_with.
+tm_setup_taken_networks() {
+  local name iface addr prefix
+  local -A row=()
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    tm_tunnel_load "$name" row || continue
+    [[ "${row[TM_TUNNEL_TYPE]:-}" == "gre" ]] || continue
+    printf '%s %s overlap\n' "${row[TM_LOCAL_TUNNEL_IP]:-}" "${row[TM_TUNNEL_CIDR]:-}"
+  done < <(tm_list_tunnels)
+  while IFS=' ' read -r iface addr prefix; do
+    [[ -n "$addr" ]] || continue
+    printf '%s %s host\n' "$addr" "$prefix"
+  done < <(tm_host_addresses)
+}
+
+tm_setup_inner_free() {
+  local local_tun="$1"
+  local cidr="$2"
+  shift 2
+  local entry addr prefix mode
+  for entry in "$@"; do
+    IFS=' ' read -r addr prefix mode <<<"$entry"
+    if [[ "$mode" == "overlap" ]]; then
+      tm_ip_subnets_overlap "$addr" "$prefix" "$local_tun" "$cidr" && return 1
+    else
+      tm_inner_clashes_with "$addr" "$prefix" "$local_tun" "$cidr" && return 1
+    fi
+  done
+  return 0
+}
+
+# Prints "LOCAL REMOTE" for a free /30 in 10.200.0.0/16. The search starts at a
+# hash of both public addresses, so Iran servers that share one foreign server
+# rarely pick the same block.
+tm_setup_suggest_inner() {
+  local local_pub="$1"
+  local remote_pub="$2"
+  local seed i n base local_tun
+  local -a taken=()
+  seed=$(printf '%s %s' "$local_pub" "$remote_pub" | cksum)
+  seed=${seed%% *}
+  mapfile -t taken < <(tm_setup_taken_networks)
+  for ((i = 0; i < 16384; i++)); do
+    n=$(((seed + i) % 16384))
+    base="10.200.$((n >> 6))"
+    local_tun="${base}.$(((n & 63) * 4 + 1))"
+    if tm_setup_inner_free "$local_tun" 30 "${taken[@]}"; then
+      printf '%s %s\n' "$local_tun" "${base}.$(((n & 63) * 4 + 2))"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Prints why this GRE setup command cannot be used on this server.
+tm_setup_foreign_conflict() {
+  local -n _tm_tok=$1
+  local other
+  local redo="On the Iran server, delete tunnel ${_tm_tok[name]} and set it up again with other inner addresses."
+  if other=$(tm_tunnel_pair_owner "${_tm_tok[foreign_ip]}" "${_tm_tok[iran_ip]}" "${_tm_tok[key]}"); then
+    printf '%s\n' "This GRE tunnel is already set up here as ${other}."
+    return 0
+  fi
+  if other=$(tm_tunnel_inner_owner "${_tm_tok[foreign_tun]}" "${_tm_tok[cidr]}"); then
+    printf '%s\n' "Inner subnet ${_tm_tok[foreign_tun]}/${_tm_tok[cidr]} is already used here by tunnel ${other}. ${redo}"
+    return 0
+  fi
+  if other=$(tm_tunnel_host_owner "${_tm_tok[foreign_tun]}" "${_tm_tok[cidr]}"); then
+    printf '%s\n' "Inner subnet ${_tm_tok[foreign_tun]}/${_tm_tok[cidr]} clashes with ${other#* } on ${other%% *} here. ${redo}"
+    return 0
+  fi
+  return 1
+}
+
+tm_setup_foreign_name() {
+  local wanted="$1"
+  if [[ ! -f "$(tm_tunnel_file "$wanted")" ]]; then
+    printf '%s\n' "$wanted"
+    return 0
+  fi
+  tm_setup_alloc_name gre
+}
+
 tm_setup_print_foreign() {
   local type="$1"
   local name="$2"
@@ -193,9 +292,10 @@ tm_setup_print_foreign() {
   local iran_tun="$5"
   local foreign_tun="$6"
   local cidr="$7"
-  local ports="$8"
+  local key="$8"
+  local ports="$9"
   local token bold="" reset=""
-  token=$(tm_setup_token "$type" "$name" "$iran_ip" "$foreign_ip" "$iran_tun" "$foreign_tun" "$cidr")
+  token=$(tm_setup_token "$type" "$name" "$iran_ip" "$foreign_ip" "$iran_tun" "$foreign_tun" "$cidr" "$key")
   if tm_styled 1; then
     bold=$'\033[1m'
     reset=$'\033[0m'
@@ -302,6 +402,7 @@ tm_setup_reject_taken_ports() {
       tm_error "A tcp forward already listens on 0.0.0.0:${listen_ports[$i]}."
       return 1
     fi
+    tm_forward_reject_port_user tcp "${listen_ports[$i]}" || return 1
   done
 }
 
@@ -318,7 +419,7 @@ tm_setup_apply_iran() {
   local ports="${10}"
   local -a listen_ports=() dest_ports=()
   local -a create_args=()
-  local i fname
+  local i fname key=0
   tm_setup_reject_taken_ports "$ports" || return 1
   tm_setup_split_ports "$ports" listen_ports dest_ports || return 1
   if [[ "$type" == "forward" && "${#listen_ports[@]}" -eq 0 ]]; then
@@ -335,6 +436,9 @@ tm_setup_apply_iran() {
     --local-tunnel-ip "$local_tun" --remote-tunnel-ip "$remote_tun"
     --cidr "$cidr" --wan-iface "$wan" --yes
   )
+  if [[ "$type" == "gre" ]] && key=$(tm_gre_key_for "$local_tun" "$cidr"); then
+    create_args+=(--key "$key")
+  fi
   tm_action_tunnel_create "${create_args[@]}" || return 1
   for i in "${!listen_ports[@]}"; do
     fname=$(tm_setup_forward_name "${listen_ports[$i]}" "${dest_ports[$i]}") || {
@@ -353,12 +457,12 @@ tm_setup_apply_iran() {
   tm_setup_ensure_boot
   if [[ "${TM_DRY_RUN:-0}" != "1" ]]; then
     tm_setup_print_foreign "$type" "$name" "$local_pub" "$remote_pub" \
-      "$local_tun" "$remote_tun" "$cidr" "$ports"
+      "$local_tun" "$remote_tun" "$cidr" "$key" "$ports"
   fi
 }
 
 tm_action_quick() {
-  local token="" wan ssh_port
+  local token="" pasted="" wan ssh_port name conflict
   local -A spec=()
   local -a flags=() create_args=()
   while [[ "$#" -gt 0 ]]; do
@@ -387,7 +491,8 @@ tm_action_quick() {
     esac
   done
   [[ -n "$token" ]] || tm_die "Paste the setup command from the Iran server."
-  token=$(tm_setup_extract_token "$token") || tm_die "That text does not contain a setup command."
+  pasted="$token"
+  token=$(tm_setup_extract_token "$pasted") || tm_die "$(tm_setup_no_token_message "$pasted")"
   tm_setup_parse_token "$token" spec || tm_die "The setup command is invalid."
   if [[ "${spec[type]}" == "forward" ]]; then
     tm_info "A plain port forward is configured on the Iran server."
@@ -403,8 +508,12 @@ tm_action_quick() {
   wan=$(tm_detect_wan "" "${spec[foreign_ip]}" "${spec[iran_ip]}" || true)
   TM_DRY_RUN="$saved_dry"
   tm_valid_iface "$wan" || tm_die "A WAN interface could not be detected."
-  if [[ -f "$(tm_tunnel_file "${spec[name]}")" ]]; then
-    tm_die "Tunnel ${spec[name]} already exists."
+  if conflict=$(tm_setup_foreign_conflict spec); then
+    tm_die "$conflict"
+  fi
+  name=$(tm_setup_foreign_name "${spec[name]}") || tm_die "Could not choose a free tunnel name."
+  if [[ "$name" != "${spec[name]}" ]]; then
+    tm_info "Tunnel name ${spec[name]} is already used here, so this tunnel is saved as ${name}."
   fi
   [[ "${TM_YES:-0}" == "1" ]] && flags+=(--yes)
   [[ "${TM_DRY_RUN:-0}" == "1" ]] && flags+=(--dry-run)
@@ -414,12 +523,13 @@ tm_action_quick() {
       --ssh-port "$ssh_port" "${flags[@]}" || return 1
   fi
   create_args=(
-    --name "${spec[name]}" --type gre
+    --name "$name" --type gre
     --local-public-ip "${spec[foreign_ip]}"
     --remote-public-ip "${spec[iran_ip]}"
     --local-tunnel-ip "${spec[foreign_tun]}"
     --remote-tunnel-ip "${spec[iran_tun]}"
     --cidr "${spec[cidr]}"
+    --key "${spec[key]}"
     --wan-iface "$wan"
   )
   create_args+=("${flags[@]}")

@@ -12,54 +12,124 @@ if [[ -n "${TM_APPLY_LOADED:-}" ]]; then
 fi
 TM_APPLY_LOADED=1
 
-tm_apply_build_plan() {
-  local name
-  tm_plan_reset
+# Prints "KIND NAME OWNER" lines. Each saved tunnel is followed by its forwards
+# for "up" and preceded by them for "down". Forwards without a saved tunnel and
+# the final sysctl step come last.
+tm_apply_items() {
+  local order="$1"
+  local name ref line
+  local -a owned=()
+  local -A row=()
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
-    tm_plan_add "Ensure tunnel ${name} matches its saved configuration" \
-      "$(tm_shell_quote tm_tunnel_ensure_undo "$name")" \
-      tm_tunnel_ensure_exec "$name"
+    owned=()
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      owned+=("forward ${line%% *} ${name}")
+    done < <(tm_setup_forwards_for "$name")
+    if [[ "$order" == "up" ]]; then
+      printf '%s\n' "tunnel ${name} -" "${owned[@]}"
+    else
+      printf '%s\n' "${owned[@]}" "tunnel ${name} -"
+    fi
   done < <(tm_list_tunnels)
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
-    tm_plan_add "Ensure forward ${name} is installed in the firewall" \
-      "$(tm_shell_quote tm_forward_ensure_undo "$name")" \
-      tm_forward_ensure_exec "$name"
+    ref="none"
+    if tm_forward_load "$name" row; then
+      ref="${row[TM_TUNNEL_REF]:-none}"
+    fi
+    if [[ "$ref" == "none" || ! -f "$(tm_tunnel_file "$ref")" ]]; then
+      printf '%s\n' "forward ${name} -"
+    fi
   done < <(tm_list_forwards)
-  tm_plan_add "Synchronize IPv4 forwarding with saved forwards" \
-    "$(tm_shell_quote tm_sysctl_sync_exec)" \
-    tm_sysctl_sync_exec
+  printf '%s\n' "final - -"
 }
 
-tm_action_apply() {
-  local -A opt=()
-  tm_opts_parse opt "$@"
-  tm_opts_bind_flags opt
-  tm_plan_require_clear_journal
-  tm_apply_build_plan
-  tm_require_change_privileges
-  tm_with_lock tm_plan_apply
+tm_apply_add_item() {
+  case "$1" in
+    tunnel)
+      tm_plan_add "Ensure tunnel $2 matches its saved configuration" \
+        "$(tm_shell_quote tm_tunnel_ensure_undo "$2")" \
+        tm_tunnel_ensure_exec "$2"
+      ;;
+    forward)
+      tm_plan_add "Ensure forward $2 is installed in the firewall" \
+        "$(tm_shell_quote tm_forward_ensure_undo "$2")" \
+        tm_forward_ensure_exec "$2"
+      ;;
+    final)
+      tm_plan_add "Synchronize IPv4 forwarding with saved forwards" \
+        "$(tm_shell_quote tm_sysctl_sync_exec)" \
+        tm_sysctl_sync_exec
+      ;;
+  esac
 }
 
-tm_down_build_plan() {
-  local name
+tm_down_add_item() {
+  case "$1" in
+    tunnel)
+      tm_plan_add "Stop tunnel $2 without deleting its configuration" \
+        "$(tm_shell_quote tm_tunnel_start_exec "$2")" \
+        tm_tunnel_stop_exec "$2"
+      ;;
+    forward)
+      tm_plan_add "Remove runtime rules for forward $2" \
+        "$(tm_shell_quote tm_forward_apply_saved "$2")" \
+        tm_forward_down_exec "$2"
+      ;;
+    final)
+      tm_plan_add "Leave saved sysctl drop-in in place when forwards remain configured" \
+        "$(tm_shell_quote tm_noop)" \
+        tm_noop
+      ;;
+  esac
+}
+
+# Asks once for the whole plan, then runs every item as its own plan, so one
+# broken tunnel or forward is rolled back without undoing the others.
+tm_apply_run_items() {
+  local order="$1"
+  local builder="$2"
+  local entry kind name owner failed="" broken=" "
+  local -a items=()
+  mapfile -t items < <(tm_apply_items "$order")
   tm_plan_reset
-  while IFS= read -r name; do
-    [[ -n "$name" ]] || continue
-    tm_plan_add "Remove runtime rules for forward ${name}" \
-      "$(tm_shell_quote tm_forward_apply_saved "$name")" \
-      tm_forward_down_exec "$name"
-  done < <(tm_list_forwards)
-  while IFS= read -r name; do
-    [[ -n "$name" ]] || continue
-    tm_plan_add "Stop tunnel ${name} without deleting its configuration" \
-      "$(tm_shell_quote tm_tunnel_start_exec "$name")" \
-      tm_tunnel_stop_exec "$name"
-  done < <(tm_list_tunnels)
-  tm_plan_add "Leave saved sysctl drop-in in place when forwards remain configured" \
-    "$(tm_shell_quote tm_noop)" \
-    tm_noop
+  for entry in "${items[@]}"; do
+    IFS=' ' read -r kind name owner <<<"$entry"
+    "$builder" "$kind" "$name"
+  done
+  tm_plan_confirm || return "$TM_PLAN_STATUS"
+  for entry in "${items[@]}"; do
+    IFS=' ' read -r kind name owner <<<"$entry"
+    if [[ "$order" == "up" && "$broken" == *" ${owner} "* ]]; then
+      tm_warn "Skipping forward ${name} because tunnel ${owner} did not start."
+      failed+="${failed:+, }forward ${name}"
+      continue
+    fi
+    tm_plan_reset
+    "$builder" "$kind" "$name"
+    if tm_plan_run; then
+      continue
+    fi
+    if [[ "$kind" == "tunnel" ]]; then
+      broken+="${name} "
+    fi
+    if [[ "$kind" == "final" ]]; then
+      failed+="${failed:+, }IPv4 forwarding"
+    else
+      failed+="${failed:+, }${kind} ${name}"
+    fi
+    if tm_journal_exists; then
+      tm_error "Stopped because the rollback did not finish. Run: tunnel-manager rollback"
+      return 4
+    fi
+  done
+  if [[ -n "$failed" ]]; then
+    tm_error "Failed or skipped: ${failed}. Everything else succeeded."
+    return 4
+  fi
+  tm_info "Changes applied."
 }
 
 tm_forward_down_exec() {
@@ -67,14 +137,22 @@ tm_forward_down_exec() {
   tm_fw_forward_delete_exec "$name"
 }
 
+tm_action_apply() {
+  local -A opt=()
+  tm_opts_parse opt "$@"
+  tm_opts_bind_flags opt
+  tm_plan_require_clear_journal
+  tm_require_change_privileges
+  tm_with_lock tm_apply_run_items up tm_apply_add_item
+}
+
 tm_action_down_all() {
   local -A opt=()
   tm_opts_parse opt "$@"
   tm_opts_bind_flags opt
   tm_plan_require_clear_journal
-  tm_down_build_plan
   tm_require_change_privileges
-  tm_with_lock tm_plan_apply
+  tm_with_lock tm_apply_run_items down tm_down_add_item
 }
 
 tm_action_rollback() {

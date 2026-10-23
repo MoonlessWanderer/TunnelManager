@@ -2,4 +2,19 @@
 set -euo pipefail
 ROOT="${TM_FAKE_ROOT:?}"
 printf '%s\n' "$*" >>"${ROOT}/ss.log"
+# ss.listen holds "PROTO LOCAL_ADDRESS:PORT" lines for sockets that listen.
+[[ -f "${ROOT}/ss.listen" ]] || exit 0
+proto=""
+port=""
+for arg in "$@"; do
+  case "$arg" in
+    -t) proto=tcp ;;
+    -u) proto=udp ;;
+    :[0-9]*) port="${arg#:}" ;;
+  esac
+done
+while read -r p addr; do
+  [[ "$p" == "$proto" && "${addr##*:}" == "$port" ]] || continue
+  printf 'LISTEN 0 4096 %s 0.0.0.0:*\n' "$addr"
+done <"${ROOT}/ss.listen"
 exit 0

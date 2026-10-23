@@ -19,6 +19,7 @@ tm_paths_init() {
   TM_LOG_DIR="${TM_LOG_DIR:-/var/log/tunnel-manager}"
   TM_RUN="${TM_RUN:-/run/tunnel-manager}"
   TM_SYSCTL_FILE="${TM_SYSCTL_FILE:-/etc/sysctl.d/99-tunnel-manager.conf}"
+  TM_SYSCTL_SCAN="${TM_SYSCTL_SCAN:-/etc/sysctl.conf /etc/sysctl.d /run/sysctl.d /usr/local/lib/sysctl.d /usr/lib/sysctl.d}"
   TM_BBR_FILE="${TM_BBR_FILE:-/etc/sysctl.d/98-tunnel-manager-bbr.conf}"
   TM_BBR_MOD_FILE="${TM_BBR_MOD_FILE:-/etc/modules-load.d/tunnel-manager-bbr.conf}"
   TM_BIN="${TM_BIN:-${TM_PREFIX:-/usr/local}/bin/tunnel-manager}"
@@ -260,7 +261,7 @@ tm_kv_key_ok() {
   case "$1" in
     TM_HOST_ROLE|TM_HOST_PUBLIC_IP|TM_HOST_WAN_IFACE|TM_SSH_PORT|TM_FW_BACKEND|\
       TM_TUNNEL_NAME|TM_TUNNEL_TYPE|TM_TUNNEL_STATE|TM_LOCAL_PUBLIC_IP|TM_REMOTE_PUBLIC_IP|\
-      TM_LOCAL_TUNNEL_IP|TM_REMOTE_TUNNEL_IP|TM_TUNNEL_CIDR|TM_MTU|TM_WAN_IFACE|\
+      TM_LOCAL_TUNNEL_IP|TM_REMOTE_TUNNEL_IP|TM_TUNNEL_CIDR|TM_MTU|TM_WAN_IFACE|TM_GRE_KEY|\
       TM_FORWARD_NAME|TM_FORWARD_PROTO|TM_LISTEN_IP|TM_LISTEN_PORT|TM_DEST_IP|TM_DEST_PORT|\
       TM_SNAT|TM_INGRESS_IFACE|TM_SOURCE_IP|TM_TUNNEL_REF)
       return 0

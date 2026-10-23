@@ -92,6 +92,7 @@ tm_test_reset() {
   export TM_LOG_DIR="${TM_TEST_ROOT}/log"
   export TM_RUN="${TM_TEST_ROOT}/run"
   export TM_SYSCTL_FILE="${TM_TEST_ROOT}/99-tunnel-manager.conf"
+  export TM_SYSCTL_SCAN="${TM_TEST_ROOT}/sysctl.d"
   export TM_BBR_FILE="${TM_TEST_ROOT}/98-tunnel-manager-bbr.conf"
   export TM_BBR_MOD_FILE="${TM_TEST_ROOT}/tunnel-manager-bbr.conf"
   export TM_FAKE_ROOT="${TM_TEST_ROOT}/fake"
