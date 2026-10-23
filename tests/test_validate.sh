@@ -64,17 +64,17 @@ tm_expect_fail "log placeholder is not a key" tm_normalize_wg_key "[REDACTED-KEY
 tm_expect_eq "default route iface" "$(tm_detect_default_iface)" "eth0"
 tm_expect_eq "nexthop route iface" "$(tm_route_dev 'nexthop via 192.0.2.1 dev ens3 weight 1')" "ens3"
 tm_expect_fail "route line without a device" tm_route_dev "default via 192.0.2.1"
-tm_expect_eq "address line iface" "$(tm_addr_show_iface '2: ens3    inet 31.184.244.31/24 brd 31.184.244.255 scope global ens3')" "ens3"
+tm_expect_eq "address line iface" "$(tm_addr_show_iface '2: ens3    inet 203.0.113.31/24 brd 203.0.113.255 scope global ens3')" "ens3"
 touch "${TM_FAKE_ROOT}/ip.no-default"
 tm_expect_fail "missing main default route" tm_detect_default_iface
-tm_expect_eq "wan follows the reachable address" "$(tm_detect_wan '' 31.184.244.31 87.107.112.226)" "eth0"
+tm_expect_eq "wan follows the reachable address" "$(tm_detect_wan '' 203.0.113.31 198.51.100.20)" "eth0"
 rm -f -- "${TM_FAKE_ROOT}/ip.no-default"
 picked=$(printf '%s\n' \
   '1: lo    inet 127.0.0.1/8 scope host lo' \
   '2: enp3s0    inet 10.1.2.3/24 scope global enp3s0' \
-  '2: enp3s0    inet 31.184.244.31/24 brd 31.184.244.255 scope global enp3s0' \
+  '2: enp3s0    inet 203.0.113.31/24 brd 203.0.113.255 scope global enp3s0' \
   | tm_pick_reachable_lines)
-tm_expect_eq "public address is preferred" "$picked" "enp3s0 31.184.244.31"
+tm_expect_eq "public address is preferred" "$picked" "enp3s0 203.0.113.31"
 picked=$(printf '%s\n' '2: enp3s0    inet 10.1.2.3/24 scope global enp3s0' | tm_pick_reachable_lines)
 tm_expect_eq "private address is used when it is the only one" "$picked" "enp3s0 10.1.2.3"
 

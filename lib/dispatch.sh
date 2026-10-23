@@ -162,7 +162,19 @@ tm_main() {
       tm_action_update "$@"
       ;;
     bbr)
-      tm_action_bbr_enable "$@"
+      case "${1:-}" in
+        disable)
+          shift
+          tm_action_bbr_disable "$@"
+          ;;
+        enable)
+          shift
+          tm_action_bbr_enable "$@"
+          ;;
+        *)
+          tm_action_bbr_enable "$@"
+          ;;
+      esac
       ;;
     *)
       tm_die "Unknown command '${cmd}'. See: tunnel-manager help"

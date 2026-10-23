@@ -138,12 +138,15 @@ tm_iptables_rule_is_safe() {
         i=$((i + 1))
         [[ "$i" -lt "$n" ]] || return 1
         daddr="${args[$i]}"
+        # iptables-nft prints a single host as address/32.
+        [[ "$daddr" == */32 ]] && daddr="${daddr%/32}"
         tm_valid_ipv4 "$daddr" || return 1
         ;;
       -s|--source)
         i=$((i + 1))
         [[ "$i" -lt "$n" ]] || return 1
         saddr="${args[$i]}"
+        [[ "$saddr" == */32 ]] && saddr="${saddr%/32}"
         tm_valid_ipv4 "$saddr" || return 1
         ;;
       --dport)
@@ -173,6 +176,7 @@ tm_iptables_rule_is_safe() {
         i=$((i + 1))
         [[ "$i" -lt "$n" ]] || return 1
         to_src="${args[$i]}"
+        [[ "$to_src" == */32 ]] && to_src="${to_src%/32}"
         ;;
       *)
         return 1

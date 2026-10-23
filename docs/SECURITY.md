@@ -7,19 +7,19 @@ administer, and review every plan before confirming it.
 
 - Flush iptables or nftables, including its own chains.
 - Change the default route or install `0.0.0.0/0` / `::/0`.
-- Overwrite a sysctl drop-in it did not write.
+- Overwrite a sysctl drop-in or BBR module file it did not write.
 - Set `rp_filter` on `all` or `default`.
 - Edit `/etc/haproxy/haproxy.cfg` or run HAProxy.
 - Bind or DNAT the SSH port recorded in the host config or in `SSH_CONNECTION`.
 - Add an SSH accept rule, or stop `ssh` / `sshd`.
 - Source state files.
 - Follow a symlink when reading or writing state.
-- Write outside its state, log, run, and sysctl paths.
+- Write outside its state, log, run, sysctl, and BBR module paths.
 - Mix iptables and nftables in one apply. `ip6tables` is used only as the
   IPv6 companion of the iptables backend, for an IPv6 tunnel endpoint.
 - Forward TCP or UDP through a second proxy. Both protocols use firewall NAT.
 - Start GRE without an explicit no-encryption acknowledgement.
-- Change the default route while enabling BBR. BBR may set only
+- Change the default route while enabling or disabling BBR. BBR may set only
   `net.core.default_qdisc` and `net.ipv4.tcp_congestion_control`.
 - Include private keys in a backup unless `--include-keys` is set.
 

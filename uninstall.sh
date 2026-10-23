@@ -14,13 +14,15 @@ LOG_DIR=/var/log/tunnel-manager
 RUN_DIR=/run/tunnel-manager
 SYSCTL_FWD=/etc/sysctl.d/99-tunnel-manager.conf
 SYSCTL_BBR=/etc/sysctl.d/98-tunnel-manager-bbr.conf
+MOD_BBR=/etc/modules-load.d/tunnel-manager-bbr.conf
 
 usage() {
   cat <<'EOF'
 Usage: uninstall.sh [--prefix DIR] [--yes] [--purge-state] [--skip-down]
 
 Stops Tunnel Manager, then removes the program. --purge-state also removes
-saved tunnels, forwards, logs, and Tunnel Manager sysctl files. Missing
+saved tunnels, forwards, logs, Tunnel Manager sysctl files, and the BBR
+module file. Missing
 paths are ignored. Firewall rules owned by other tools are left in place.
 EOF
 }
@@ -46,6 +48,7 @@ if [[ "${TM_TEST_MODE:-0}" == "1" ]]; then
   RUN_DIR=${TM_RUN:-$RUN_DIR}
   SYSCTL_FWD=${TM_SYSCTL_FILE:-$SYSCTL_FWD}
   SYSCTL_BBR=${TM_BBR_FILE:-$SYSCTL_BBR}
+  MOD_BBR=${TM_BBR_MOD_FILE:-$MOD_BBR}
 fi
 
 if [[ -z "$PREFIX" || "$PREFIX" == "/" || "$PREFIX" == "/etc" || "$PREFIX" == "/usr" ]]; then
@@ -123,9 +126,9 @@ if [[ "$PURGE_STATE" -eq 1 ]]; then
       exit 1
     fi
   done
-  for sysctl_file in "$SYSCTL_FWD" "$SYSCTL_BBR"; do
+  for sysctl_file in "$SYSCTL_FWD" "$SYSCTL_BBR" "$MOD_BBR"; do
     case "$sysctl_file" in
-      /etc/sysctl.d/99-tunnel-manager.conf|/etc/sysctl.d/98-tunnel-manager-bbr.conf)
+      /etc/sysctl.d/99-tunnel-manager.conf|/etc/sysctl.d/98-tunnel-manager-bbr.conf|/etc/modules-load.d/tunnel-manager-bbr.conf)
         rm -f -- "$sysctl_file"
         ;;
       *)

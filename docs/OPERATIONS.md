@@ -160,8 +160,11 @@ transit.
    - Maintenance has status, troubleshoot, backup, restore, apply, dry-run, and rollback.
 3. Update reinstalls the program and keeps saved tunnels.
 4. Uninstall asks once, then removes the program, saved tunnels, and logs. Missing paths are ignored. Other firewall rules are not flushed.
-5. Enable BBR. The plan sets `net.core.default_qdisc=fq` and
-   `net.ipv4.tcp_congestion_control=bbr`. It does not change the default route.
+5. Enable BBR, or Disable BBR when those boot settings are already saved.
+   Enable sets `net.core.default_qdisc=fq` and
+   `net.ipv4.tcp_congestion_control=bbr`, and loads `tcp_bbr` on the next boot.
+   Disable restores the previous values and removes the boot settings, so a
+   reboot does not turn BBR on again. Neither choice changes the default route.
 
 ## Reboot
 

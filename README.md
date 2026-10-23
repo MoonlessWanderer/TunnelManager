@@ -59,7 +59,8 @@ Useful installer flags:
 
 `uninstall.sh` stops Tunnel Manager through its own `down` command and removes
 its files. The menu uninstall, and `--purge-state`, also remove saved tunnels,
-forwards, logs, and the Tunnel Manager sysctl files. Missing paths are ignored.
+forwards, logs, the Tunnel Manager sysctl files, and the BBR module file.
+Missing paths are ignored.
 Firewall rules owned by other tools stay in place.
 
 ## Typical flow
@@ -85,7 +86,7 @@ sudo tunnel-manager quick v1:gre:edge:203.0.113.10:203.0.113.20:10.200.0.1:10.20
 2. Manage Tunnels. Lists saved tunnels. If none are saved, it says so. Choosing one tunnel shows only that tunnel's actions.
 3. Update downloads the main branch and reinstalls the program. Saved tunnels stay in place and services are not enabled.
 4. Uninstall asks once, then removes the program and everything it saved. Missing files are skipped. Other firewall rules stay in place.
-5. Enable BBR sets `fq` and `bbr` only. It does not change the default route.
+5. Enable BBR sets `fq` and `bbr` and keeps them after reboot. When BBR is already saved, the same item becomes Disable BBR. Disable restores the previous settings and does not turn BBR back on after reboot. Neither choice changes the default route.
 
 `tunnel-manager --dry-run apply` prints the plan and does not change the system.
 

@@ -20,6 +20,7 @@ tm_paths_init() {
   TM_RUN="${TM_RUN:-/run/tunnel-manager}"
   TM_SYSCTL_FILE="${TM_SYSCTL_FILE:-/etc/sysctl.d/99-tunnel-manager.conf}"
   TM_BBR_FILE="${TM_BBR_FILE:-/etc/sysctl.d/98-tunnel-manager-bbr.conf}"
+  TM_BBR_MOD_FILE="${TM_BBR_MOD_FILE:-/etc/modules-load.d/tunnel-manager-bbr.conf}"
   TM_BIN="${TM_BIN:-/usr/local/bin/tunnel-manager}"
   TM_LIB_INSTALL="${TM_LIB_INSTALL:-/usr/local/lib/tunnel-manager}"
 }
@@ -105,11 +106,12 @@ tm_assert_storage_roots() {
   [[ "$TM_RUN" == /run/tunnel-manager ]] || tm_die "Refusing TM_RUN=${TM_RUN}"
   [[ "$TM_SYSCTL_FILE" == /etc/sysctl.d/99-tunnel-manager.conf ]] || tm_die "Refusing TM_SYSCTL_FILE=${TM_SYSCTL_FILE}"
   [[ "$TM_BBR_FILE" == /etc/sysctl.d/98-tunnel-manager-bbr.conf ]] || tm_die "Refusing TM_BBR_FILE=${TM_BBR_FILE}"
+  [[ "$TM_BBR_MOD_FILE" == /etc/modules-load.d/tunnel-manager-bbr.conf ]] || tm_die "Refusing TM_BBR_MOD_FILE=${TM_BBR_MOD_FILE}"
 }
 
 tm_path_is_mutable() {
   local raw="$1"
-  local path etc var log run sysctl bbr=""
+  local path etc var log run sysctl bbr="" bbr_mod=""
   path=$(tm_normalize_path "$raw") || return 1
   etc=$(tm_normalize_path "$TM_ETC") || return 1
   var=$(tm_normalize_path "$TM_VAR") || return 1
@@ -117,11 +119,12 @@ tm_path_is_mutable() {
   run=$(tm_normalize_path "$TM_RUN") || return 1
   sysctl=$(tm_normalize_path "$TM_SYSCTL_FILE") || return 1
   bbr=$(tm_normalize_path "$TM_BBR_FILE") || return 1
+  bbr_mod=$(tm_normalize_path "$TM_BBR_MOD_FILE") || return 1
   if tm_path_under "$path" "$etc" \
     || tm_path_under "$path" "$var" \
     || tm_path_under "$path" "$log" \
     || tm_path_under "$path" "$run" \
-    || [[ "$path" == "$sysctl" || "$path" == "$bbr" ]]; then
+    || [[ "$path" == "$sysctl" || "$path" == "$bbr" || "$path" == "$bbr_mod" ]]; then
     :
   else
     return 1

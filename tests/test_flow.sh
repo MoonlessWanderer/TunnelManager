@@ -144,12 +144,22 @@ if grep -q 'net.core.default_qdisc = fq' "$TM_BBR_FILE" \
   && grep -q 'net.ipv4.tcp_congestion_control = bbr' "$TM_BBR_FILE" \
   && grep -q 'net.core.default_qdisc=fq' "${TM_FAKE_ROOT}/sysctl.state" \
   && grep -q 'net.ipv4.tcp_congestion_control=bbr' "${TM_FAKE_ROOT}/sysctl.state" \
-  && grep -q 'tcp_bbr' "${TM_FAKE_ROOT}/modprobe.log"; then
-  tm_pass "bbr enables fq and bbr only"
+  && grep -q 'tcp_bbr' "${TM_FAKE_ROOT}/modprobe.log" \
+  && grep -q '^tcp_bbr$' "$TM_BBR_MOD_FILE"; then
+  tm_pass "bbr enables fq and bbr and saves them for reboot"
 else
   tm_fail "bbr did not enable the expected settings"
 fi
 tm_expect_ok "bbr stays enabled" tm_action_bbr_enable --yes
+tm_expect_ok "disable bbr" tm_action_bbr_disable --yes
+if [[ ! -e "$TM_BBR_FILE" && ! -e "$TM_BBR_MOD_FILE" ]] \
+  && grep -q 'net.core.default_qdisc=fq_codel' "${TM_FAKE_ROOT}/sysctl.state" \
+  && grep -q 'net.ipv4.tcp_congestion_control=cubic' "${TM_FAKE_ROOT}/sysctl.state"; then
+  tm_pass "disable bbr removes the boot settings and restores the previous values"
+else
+  tm_fail "disable bbr left BBR enabled"
+fi
+tm_expect_ok "disabled bbr stays off" tm_action_bbr_disable --yes
 
 printf '%s\n' 'eth0 203.0.113.31/32' >>"${TM_FAKE_ROOT}/ip.addrs"
 set +e

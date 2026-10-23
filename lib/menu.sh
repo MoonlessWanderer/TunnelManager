@@ -690,21 +690,36 @@ tm_menu_manage() {
   done
 }
 
+tm_menu_bbr_label() {
+  if tm_bbr_persistent; then
+    printf '%s\n' "Disable BBR"
+  else
+    printf '%s\n' "Enable BBR"
+  fi
+}
+
 tm_menu() {
-  local choice=""
+  local choice="" bbr_label=""
   while true; do
+    bbr_label=$(tm_menu_bbr_label)
     choice=$(tm_menu_choose "" "Exit" \
       "Configure a New Tunnel" \
       "Manage Tunnels" \
       "Update" \
       "Uninstall" \
-      "Enable BBR") || return 1
+      "$bbr_label") || return 1
     case "$choice" in
       1) tm_menu_configure ;;
       2) tm_menu_manage ;;
       3) tm_menu_run tm_action_update ;;
       4) tm_menu_uninstall ;;
-      5) tm_menu_run tm_action_bbr_enable ;;
+      5)
+        if [[ "$bbr_label" == "Disable BBR" ]]; then
+          tm_menu_run tm_action_bbr_disable
+        else
+          tm_menu_run tm_action_bbr_enable
+        fi
+        ;;
       0) tm_info "Goodbye."; return 0 ;;
       *) tm_warn "Unknown choice." ;;
     esac

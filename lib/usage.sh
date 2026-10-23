@@ -62,7 +62,8 @@ Usage:
   tunnel-manager backup list
   tunnel-manager service enable|disable|status [--yes]
   tunnel-manager update [--dry-run] [--yes]
-  tunnel-manager bbr [--dry-run] [--yes]
+  tunnel-manager bbr enable [--dry-run] [--yes]
+  tunnel-manager bbr disable [--dry-run] [--yes]
 
 tm opens the menu. tunnel-manager with no arguments does the same on a terminal.
 
@@ -76,7 +77,10 @@ Menu:
      Choosing a tunnel shows only that tunnel's actions.
   3  Update the program.
   4  Uninstall. One confirmation removes the program and all of its saved state.
-  5  Enable BBR. Sets fq and bbr only. The default route is not changed.
+  5  Enable BBR, or Disable BBR when it is already saved.
+     Enable loads tcp_bbr and writes boot settings for fq and bbr.
+     Disable restores the previous queue and congestion control and
+     removes those boot settings. The default route is not changed.
 
 Global flags:
   --yes       Apply without an extra confirmation prompt.
