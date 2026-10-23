@@ -52,6 +52,8 @@ source "${_tm_load_dir}/health.sh"
 source "${_tm_load_dir}/service.sh"
 # shellcheck source=update.sh
 source "${_tm_load_dir}/update.sh"
+# shellcheck source=bbr.sh
+source "${_tm_load_dir}/bbr.sh"
 # shellcheck source=usage.sh
 source "${_tm_load_dir}/usage.sh"
 # shellcheck source=menu.sh

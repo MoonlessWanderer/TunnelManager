@@ -718,6 +718,12 @@ tm_sysctl_key_is_safe() {
       fi
       return 0
       ;;
+    net.core.default_qdisc|net.ipv4.tcp_congestion_control)
+      if [[ -n "$value" ]]; then
+        [[ "$value" =~ ^[a-z0-9_]{1,32}$ ]] || return 1
+      fi
+      return 0
+      ;;
     *)
       return 1
       ;;
@@ -801,7 +807,7 @@ tm_modprobe_argv_is_safe() {
   [[ "$1" == "modprobe" ]] || return 1
   [[ "$#" -eq 2 ]] || return 1
   case "$2" in
-    ip_gre|ip6_gre|wireguard) return 0 ;;
+    ip_gre|ip6_gre|wireguard|tcp_bbr) return 0 ;;
     *) return 1 ;;
   esac
 }

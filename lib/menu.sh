@@ -34,18 +34,40 @@ tm_menu_run() {
   tm_menu_pause
 }
 
+tm_menu_choose() {
+  local title="$1"
+  local exit_label="$2"
+  shift 2
+  local -a items=("$@")
+  local choice=""
+  local i
+  printf '\n%s\n' "═══════════════════════════════════════════" >/dev/tty
+  printf '\n' >/dev/tty
+  if [[ -n "$title" ]]; then
+    printf '  %s\n\n' "$title" >/dev/tty
+  fi
+  for i in "${!items[@]}"; do
+    printf '  %s. %s\n' "$((i + 1))" "${items[$i]}" >/dev/tty
+  done
+  printf '  %s. %s\n' "0" "$exit_label" >/dev/tty
+  printf '\n%s\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >/dev/tty
+  if [[ ! -r /dev/tty ]]; then
+    tm_die "A terminal is required for interactive input."
+  fi
+  read -r -p "Enter your choice [0–${#items[@]}]: " choice </dev/tty || return 1
+  printf '%s\n' "$choice"
+}
+
 tm_menu_forward() {
   local choice=""
   while true; do
-    printf '\n%s\n' "Port forwards"
-    printf '%s\n' "  1) Add TCP forward (HAProxy)"
-    printf '%s\n' "  2) Add UDP forward (NAT)"
-    printf '%s\n' "  3) Edit a forward"
-    printf '%s\n' "  4) Delete a forward"
-    printf '%s\n' "  5) List forwards"
-    printf '%s\n' "  6) Test a forward"
-    printf '%s\n' "  0) Back"
-    tm_prompt choice "Choose" || return 1
+    choice=$(tm_menu_choose "Port forwards" "Back" \
+      "Add TCP forward" \
+      "Add UDP forward" \
+      "Edit a forward" \
+      "Delete a forward" \
+      "List forwards" \
+      "Test a forward") || return 1
     case "$choice" in
       1) tm_menu_add_forward tcp ;;
       2) tm_menu_add_forward udp ;;
@@ -216,7 +238,7 @@ tm_menu_quick_setup() {
   if [[ -f "$(tm_tunnel_file edge)" ]]; then
     tm_info "Tunnel edge already exists. Its public key is printed below."
     tm_print_public_key edge || tm_die "Tunnel edge has no public key."
-    tm_info "On the other server, choose Paste the other server public key."
+    tm_info "On the other server, open Manage Tunnels and paste this public key."
     return 0
   fi
   tm_prompt role "This server: iran or foreign" "iran" || return 1
@@ -263,56 +285,129 @@ tm_menu_named() {
   tm_menu_run "$action" --name "$name"
 }
 
-tm_menu() {
+tm_menu_uninstall_script() {
+  local dir="${TM_LIB_DIR:-}"
+  local parent=""
+  if [[ -n "$dir" && -f "${dir}/uninstall.sh" ]]; then
+    printf '%s\n' "${dir}/uninstall.sh"
+    return 0
+  fi
+  if [[ -n "$dir" ]]; then
+    parent=$(cd -P "${dir}/.." && pwd) || return 1
+    if [[ -f "${parent}/uninstall.sh" ]]; then
+      printf '%s\n' "${parent}/uninstall.sh"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+tm_menu_uninstall() {
+  local script="" prefix=""
+  local -a purge=()
+  script=$(tm_menu_uninstall_script) || tm_die "uninstall.sh was not found. Reinstall Tunnel Manager."
+  prefix="${TM_PREFIX:-/usr/local}"
+  printf '\n%s\n' "This stops Tunnel Manager and removes the program."
+  printf '%s\n' "Firewall rules owned by other tools are not flushed."
+  if ! tm_confirm "Uninstall Tunnel Manager?"; then
+    tm_info "Uninstall was not started."
+    return 0
+  fi
+  if tm_confirm "Also delete saved tunnels and keys?"; then
+    purge=(--purge-state)
+  fi
+  bash "$script" --prefix "$prefix" --yes "${purge[@]}"
+  exit 0
+}
+
+tm_menu_configure() {
   local choice=""
-  tm_info "Tunnel Manager does not flush firewall rules or change the default route."
   while true; do
-    printf '\n%s\n' "Tunnel Manager ${TM_VERSION}"
-    printf '%s\n' "  1) Quick WireGuard setup"
-    printf '%s\n' "  2) Paste the other server public key"
-    printf '%s\n' "  3) Show my public key"
-    printf '%s\n' "  4) Forward a port"
-    printf '%s\n' "  5) Test tunnel"
-    printf '%s\n' "  6) Create tunnel (advanced)"
-    printf '%s\n' "  7) Delete tunnel"
-    printf '%s\n' "  8) Restart tunnel"
-    printf '%s\n' "  9) Manage port forwards"
-    printf '%s\n' " 10) Show status"
-    printf '%s\n' " 11) Troubleshoot"
-    printf '%s\n' " 12) Create backup"
-    printf '%s\n' " 13) Restore backup"
-    printf '%s\n' " 14) Apply saved state"
-    printf '%s\n' " 15) Dry-run apply"
-    printf '%s\n' " 16) Roll back an interrupted change"
-    printf '%s\n' " 17) Update Tunnel Manager"
-    printf '%s\n' "  0) Exit"
-    tm_prompt choice "Choose" || return 1
+    choice=$(tm_menu_choose "Configure a New Tunnel" "Back" \
+      "Quick WireGuard setup" \
+      "Advanced tunnel") || return 1
     case "$choice" in
       1) tm_menu_run tm_menu_quick_setup ;;
-      2) tm_menu_run tm_menu_paste_peer ;;
-      3) tm_menu_show_key; tm_menu_pause ;;
-      4) tm_menu_run tm_menu_quick_forward ;;
-      5) tm_menu_named tm_action_tunnel_test ;;
-      6) tm_menu_create_tunnel ;;
-      7) tm_menu_named tm_action_tunnel_delete ;;
-      8) tm_menu_named tm_action_tunnel_restart ;;
-      9) tm_menu_forward ;;
-      10) tm_action_status; tm_menu_pause ;;
-      11) tm_menu_run tm_action_doctor ;;
-      12)
-        local output=""
+      2) tm_menu_create_tunnel ;;
+      0) return 0 ;;
+      *) tm_warn "Unknown choice." ;;
+    esac
+  done
+}
+
+tm_menu_maintenance() {
+  local choice="" output="" file=""
+  while true; do
+    choice=$(tm_menu_choose "Maintenance" "Back" \
+      "Status" \
+      "Troubleshoot" \
+      "Backup" \
+      "Restore" \
+      "Apply saved state" \
+      "Dry-run apply" \
+      "Roll back") || return 1
+    case "$choice" in
+      1) tm_action_status; tm_menu_pause ;;
+      2) tm_menu_run tm_action_doctor ;;
+      3)
         tm_prompt output "Backup output path" "${TM_VAR}/backups/manual.tar.gz" || continue
         tm_menu_run tm_action_backup_create --output "$output"
         ;;
-      13)
-        local file=""
+      4)
         tm_prompt file "Backup file" || continue
         tm_menu_run tm_action_backup_restore --file "$file"
         ;;
-      14) tm_menu_run tm_action_apply ;;
-      15) tm_menu_run tm_action_apply --dry-run ;;
-      16) tm_menu_run tm_action_rollback ;;
-      17) tm_menu_run tm_action_update ;;
+      5) tm_menu_run tm_action_apply ;;
+      6) tm_menu_run tm_action_apply --dry-run ;;
+      7) tm_menu_run tm_action_rollback ;;
+      0) return 0 ;;
+      *) tm_warn "Unknown choice." ;;
+    esac
+  done
+}
+
+tm_menu_manage() {
+  local choice=""
+  while true; do
+    choice=$(tm_menu_choose "Manage Tunnels" "Back" \
+      "Show public key" \
+      "Paste the other server key" \
+      "Forward a port" \
+      "Test tunnel" \
+      "Restart tunnel" \
+      "Delete tunnel" \
+      "Port forwards" \
+      "Maintenance") || return 1
+    case "$choice" in
+      1) tm_menu_show_key; tm_menu_pause ;;
+      2) tm_menu_run tm_menu_paste_peer ;;
+      3) tm_menu_run tm_menu_quick_forward ;;
+      4) tm_menu_named tm_action_tunnel_test ;;
+      5) tm_menu_named tm_action_tunnel_restart ;;
+      6) tm_menu_named tm_action_tunnel_delete ;;
+      7) tm_menu_forward ;;
+      8) tm_menu_maintenance ;;
+      0) return 0 ;;
+      *) tm_warn "Unknown choice." ;;
+    esac
+  done
+}
+
+tm_menu() {
+  local choice=""
+  while true; do
+    choice=$(tm_menu_choose "" "Exit" \
+      "Configure a New Tunnel" \
+      "Manage Tunnels" \
+      "Update" \
+      "Uninstall" \
+      "Enable BBR") || return 1
+    case "$choice" in
+      1) tm_menu_configure ;;
+      2) tm_menu_manage ;;
+      3) tm_menu_run tm_action_update ;;
+      4) tm_menu_uninstall ;;
+      5) tm_menu_run tm_action_bbr_enable ;;
       0) tm_info "Goodbye."; return 0 ;;
       *) tm_warn "Unknown choice." ;;
     esac

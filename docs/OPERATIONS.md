@@ -143,19 +143,21 @@ transit.
 
 `sudo tm` opens the menu.
 
-1. Quick WireGuard setup asks which side this server is and the two reachable
-   addresses. It uses tunnel name `edge`, inner addresses `10.200.0.1` and
-   `10.200.0.2`, listen port 51820, and the detected WAN interface. The public
-   key is printed as one line after the change is applied.
-2. Paste the other server public key. Extra words around the key are ignored.
-   The log placeholder `[REDACTED-KEY]` is rejected.
-3. Show my public key.
-4. Forward a port. Press Enter to forward TCP 443 through `edge`. Destination,
-   source, and WAN interface come from the saved tunnel.
-
-The remaining items create a tunnel with custom addresses, delete, restart,
-test, edit forwards, show status, troubleshoot, back up, restore, apply,
-dry-run, roll back, and update.
+1. Configure a New Tunnel
+   - Quick WireGuard setup asks which side this server is and the two reachable
+     addresses. It uses tunnel name `edge`, inner addresses `10.200.0.1` and
+     `10.200.0.2`, listen port 51820, and the detected WAN interface.
+   - Advanced tunnel asks for every address.
+2. Manage Tunnels
+   - Show the public key, paste the other server's key, or forward a port.
+     Press Enter on the forward prompts to publish TCP 443 through `edge`.
+   - Test, restart, and delete a tunnel.
+   - Port forwards has add, edit, delete, list, and test.
+   - Maintenance has status, troubleshoot, backup, restore, apply, dry-run, and rollback.
+3. Update reinstalls the program and keeps saved tunnels.
+4. Uninstall stops Tunnel Manager and does not flush other firewall rules.
+5. Enable BBR. The plan sets `net.core.default_qdisc=fq` and
+   `net.ipv4.tcp_congestion_control=bbr`. It does not change the default route.
 
 ## Reboot
 

@@ -160,6 +160,9 @@ tm_main() {
     update)
       tm_action_update "$@"
       ;;
+    bbr)
+      tm_action_bbr_enable "$@"
+      ;;
     *)
       tm_die "Unknown command '${cmd}'. See: tunnel-manager help"
       ;;

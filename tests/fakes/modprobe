@@ -3,6 +3,6 @@ set -euo pipefail
 ROOT="${TM_FAKE_ROOT:?}"
 printf '%s\n' "$*" >>"${ROOT}/modprobe.log"
 case "${1:-}" in
-  ip_gre|ip6_gre|wireguard) exit 0 ;;
+  ip_gre|ip6_gre|wireguard|tcp_bbr) exit 0 ;;
   *) exit 1 ;;
 esac

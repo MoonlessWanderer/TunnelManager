@@ -136,6 +136,7 @@ for local_sh in "${ROOT}/lib/"*.sh; do
   install -m 0644 "$local_sh" "${LIB_DEST}/$(basename "$local_sh")"
 done
 install -m 0755 "${ROOT}/lib/haproxy-reload.sh" "${LIB_DEST}/haproxy-reload.sh"
+install -m 0755 "${ROOT}/uninstall.sh" "${LIB_DEST}/uninstall.sh"
 if [[ -d "${ROOT}/examples" ]]; then
   for local_sh in "${ROOT}/examples/"*; do
     [[ -f "$local_sh" ]] || continue

@@ -17,7 +17,7 @@ else
   tm_fail "tm does not open the menu"
 fi
 installed_version=$(bash "${prefix}/bin/tunnel-manager" version)
-tm_expect_eq "installed version" "$installed_version" "1.2.0"
+tm_expect_eq "installed version" "$installed_version" "1.3.0"
 bash "${TM_REPO}/uninstall.sh" --prefix "$prefix" --yes --skip-down
 if [[ ! -e "${prefix}/bin/tunnel-manager" && ! -e "${prefix}/bin/tm" && ! -e "${prefix}/lib/tunnel-manager" ]]; then
   tm_pass "uninstall removes installed files"
@@ -48,10 +48,12 @@ else
   tm_fail "update did not reinstall the program"
 fi
 unset TM_UPDATE_ARCHIVE TM_PREFIX
-if grep -q '17) Update Tunnel Manager' "${TM_REPO}/lib/menu.sh"; then
-  tm_pass "menu contains update"
+if grep -q 'Configure a New Tunnel' "${TM_REPO}/lib/menu.sh" \
+  && grep -q 'Enable BBR' "${TM_REPO}/lib/menu.sh" \
+  && grep -q 'Enter your choice' "${TM_REPO}/lib/menu.sh"; then
+  tm_pass "menu contains the short main screen"
 else
-  tm_fail "menu is missing update"
+  tm_fail "menu is missing the short main screen"
 fi
 
 tm_finish

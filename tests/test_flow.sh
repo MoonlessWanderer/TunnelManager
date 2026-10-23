@@ -191,4 +191,19 @@ else
   tm_fail "failed tcp forward did not restore HAProxy state"
 fi
 
+printf 'net.ipv4.ip_forward = 1\n' >"$TM_BBR_FILE"
+tm_expect_fail "foreign bbr file is refused" tm_action_bbr_enable --yes
+rm -f -- "$TM_BBR_FILE"
+tm_expect_ok "enable bbr" tm_action_bbr_enable --yes
+if grep -q 'net.core.default_qdisc = fq' "$TM_BBR_FILE" \
+  && grep -q 'net.ipv4.tcp_congestion_control = bbr' "$TM_BBR_FILE" \
+  && grep -q 'net.core.default_qdisc=fq' "${TM_FAKE_ROOT}/sysctl.state" \
+  && grep -q 'net.ipv4.tcp_congestion_control=bbr' "${TM_FAKE_ROOT}/sysctl.state" \
+  && grep -q 'tcp_bbr' "${TM_FAKE_ROOT}/modprobe.log"; then
+  tm_pass "bbr enables fq and bbr only"
+else
+  tm_fail "bbr did not enable the expected settings"
+fi
+tm_expect_ok "bbr stays enabled" tm_action_bbr_enable --yes
+
 tm_finish

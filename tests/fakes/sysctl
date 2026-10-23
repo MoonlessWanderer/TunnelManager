@@ -11,10 +11,20 @@ if [[ "${1:-}" == "-n" ]]; then
   key="${2:-}"
   value=$(awk -F '=' -v k="$key" '$1 == k { print $2 }' "$STATE" | tail -n 1)
   if [[ -z "$value" ]]; then
-    if [[ "$key" == "net.ipv4.ip_forward" ]]; then
-      printf '%s\n' "0"
-      exit 0
-    fi
+    case "$key" in
+      net.ipv4.ip_forward)
+        printf '%s\n' "0"
+        exit 0
+        ;;
+      net.core.default_qdisc)
+        printf '%s\n' "fq_codel"
+        exit 0
+        ;;
+      net.ipv4.tcp_congestion_control)
+        printf '%s\n' "cubic"
+        exit 0
+        ;;
+    esac
     exit 1
   fi
   printf '%s\n' "$value"

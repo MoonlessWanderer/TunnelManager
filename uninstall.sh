@@ -61,6 +61,22 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
   systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 
+restore_sysctl() {
+  local key="$1"
+  local file="$2"
+  local value=""
+  [[ -f "$file" ]] || return 0
+  value=$(tr -d '[:space:]' <"$file")
+  if [[ "$value" =~ ^[a-z0-9_]{1,32}$ ]] && command -v sysctl >/dev/null 2>&1; then
+    sysctl -w "${key}=${value}" >/dev/null 2>&1 || printf '%s\n' "Could not restore ${key}." >&2
+  fi
+}
+if [[ "$(id -u)" -eq 0 ]]; then
+  restore_sysctl net.core.default_qdisc /var/lib/tunnel-manager/bbr.qdisc.prev
+  restore_sysctl net.ipv4.tcp_congestion_control /var/lib/tunnel-manager/bbr.cc.prev
+  rm -f -- /etc/sysctl.d/98-tunnel-manager-bbr.conf
+fi
+
 rm -f -- "${PREFIX}/bin/tunnel-manager" "${PREFIX}/bin/tm"
 rm -rf -- "${PREFIX}/lib/tunnel-manager"
 rm -rf -- "${PREFIX}/share/tunnel-manager"

@@ -20,6 +20,7 @@ tm_paths_init() {
   TM_RUN="${TM_RUN:-/run/tunnel-manager}"
   TM_WG_DIR="${TM_WG_DIR:-/etc/wireguard}"
   TM_SYSCTL_FILE="${TM_SYSCTL_FILE:-/etc/sysctl.d/99-tunnel-manager.conf}"
+  TM_BBR_FILE="${TM_BBR_FILE:-/etc/sysctl.d/98-tunnel-manager-bbr.conf}"
   TM_HAPROXY_CFG="${TM_HAPROXY_CFG:-${TM_ETC}/haproxy.cfg}"
   TM_HAPROXY_PID="${TM_HAPROXY_PID:-${TM_RUN}/haproxy.pid}"
   TM_BIN="${TM_BIN:-/usr/local/bin/tunnel-manager}"
@@ -107,6 +108,7 @@ tm_assert_storage_roots() {
   [[ "$TM_RUN" == /run/tunnel-manager ]] || tm_die "Refusing TM_RUN=${TM_RUN}"
   [[ "$TM_WG_DIR" == /etc/wireguard ]] || tm_die "Refusing TM_WG_DIR=${TM_WG_DIR}"
   [[ "$TM_SYSCTL_FILE" == /etc/sysctl.d/99-tunnel-manager.conf ]] || tm_die "Refusing TM_SYSCTL_FILE=${TM_SYSCTL_FILE}"
+  [[ "$TM_BBR_FILE" == /etc/sysctl.d/98-tunnel-manager-bbr.conf ]] || tm_die "Refusing TM_BBR_FILE=${TM_BBR_FILE}"
 }
 
 tm_is_wg_conf_path() {
@@ -120,19 +122,20 @@ tm_is_wg_conf_path() {
 
 tm_path_is_mutable() {
   local raw="$1"
-  local path etc var log run wg="" sysctl
+  local path etc var log run wg="" sysctl bbr=""
   path=$(tm_normalize_path "$raw") || return 1
   etc=$(tm_normalize_path "$TM_ETC") || return 1
   var=$(tm_normalize_path "$TM_VAR") || return 1
   log=$(tm_normalize_path "$TM_LOG_DIR") || return 1
   run=$(tm_normalize_path "$TM_RUN") || return 1
   sysctl=$(tm_normalize_path "$TM_SYSCTL_FILE") || return 1
+  bbr=$(tm_normalize_path "$TM_BBR_FILE") || return 1
   wg=$(tm_normalize_path "$TM_WG_DIR") || return 1
   if tm_path_under "$path" "$etc" \
     || tm_path_under "$path" "$var" \
     || tm_path_under "$path" "$log" \
     || tm_path_under "$path" "$run" \
-    || [[ "$path" == "$sysctl" || "$path" == "$wg" ]] \
+    || [[ "$path" == "$sysctl" || "$path" == "$bbr" || "$path" == "$wg" ]] \
     || tm_is_wg_conf_path "$path"; then
     :
   else

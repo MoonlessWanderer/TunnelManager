@@ -19,6 +19,8 @@ administer, and review every plan before confirming it.
   IPv6 companion of the iptables backend, for an IPv6 tunnel endpoint.
 - Reload HAProxy without a successful `haproxy -c`.
 - Start GRE without an explicit no-encryption acknowledgement.
+- Change the default route while enabling BBR. BBR may set only
+  `net.core.default_qdisc` and `net.ipv4.tcp_congestion_control`.
 - Include private keys in a backup unless `--include-keys` is set.
 
 ## Keys

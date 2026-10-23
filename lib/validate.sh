@@ -161,7 +161,7 @@ tm_normalize_wg_key() {
   key=${key//$'\r'/}
   key=${key//$'\n'/}
   if [[ "$key" == *"[REDACTED-KEY]"* || "$key" == *REDACTED-KEY* ]]; then
-    tm_error "That text is a log placeholder, not the key. On the other server run sudo tm and choose Show my public key. Copy the line that ends with =."
+    tm_error "That text is a log placeholder, not the key. On the other server run sudo tm, open Manage Tunnels, and choose Show public key. Copy the line that ends with =."
     return 1
   fi
   if [[ "$key" =~ ([A-Za-z0-9+/]{43}=) ]]; then
