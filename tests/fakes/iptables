@@ -30,6 +30,16 @@ if [[ "${1:-}" == "-V" || "${1:-}" == "--version" ]]; then
   exit 0
 fi
 
+# A word listed in the refuse file stands for a kernel module that is missing.
+if [[ -f "${ROOT}/${TAG}.refuse" ]]; then
+  for arg in "$@"; do
+    if grep -qxF -- "$arg" "${ROOT}/${TAG}.refuse"; then
+      printf '%s\n' "iptables: No chain/target/match by that name." >&2
+      exit 1
+    fi
+  done
+fi
+
 table="filter"
 args=("$@")
 i=0
@@ -53,7 +63,8 @@ chain="${args[$((i + 1))]:-}"
 
 builtin_chain() {
   case "$1:$2" in
-    filter:INPUT|filter:OUTPUT|filter:FORWARD|nat:PREROUTING|nat:INPUT|nat:OUTPUT|nat:POSTROUTING)
+    filter:INPUT|filter:OUTPUT|filter:FORWARD|nat:PREROUTING|nat:INPUT|nat:OUTPUT|nat:POSTROUTING|\
+      mangle:PREROUTING|mangle:INPUT|mangle:FORWARD|mangle:OUTPUT|mangle:POSTROUTING)
       return 0
       ;;
     *)

@@ -28,8 +28,16 @@ unset 'TM_BIN_OVERRIDE[nft]'
 TM_FW_BACKEND=iptables
 tm_expect_ok "first udp apply" tm_iptables_l4_apply_exec udp edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
 tm_expect_ok "second udp apply" tm_iptables_l4_apply_exec udp edge eth0 5000 10.200.0.2 5000 10.200.0.1 yes
-appends=$(grep -c -- "-A TM_PREROUTING" "${TM_FAKE_ROOT}/iptables.log" || true)
+appends=$(grep -c -- "-A TM_PREROUTING .*tm:udp:edge:dnat -j" "${TM_FAKE_ROOT}/iptables.log" || true)
 tm_expect_eq "DNAT is not duplicated" "$appends" "1"
+appends=$(grep -c -- "-A TM_PREROUTING -i tm-+ -m addrtype --dst-type LOCAL -p udp --dport 5000 .*tm:udp:edge:tundnat -j DNAT --to-destination 10.200.0.2:5000" \
+  "${TM_FAKE_ROOT}/iptables.log" || true)
+tm_expect_eq "DNAT from the tunnels is installed once" "$appends" "1"
+if grep -q -- "-t mangle" "${TM_FAKE_ROOT}/iptables.log"; then
+  tm_fail "udp forward touched the mangle table"
+else
+  tm_pass "udp forward has no MSS clamp"
+fi
 if grep -E '(^|[[:space:]])-F([[:space:]]|$)|--flush' "${TM_FAKE_ROOT}/iptables.log"; then
   tm_fail "iptables log contains a flush"
 else
@@ -42,16 +50,56 @@ else
 fi
 IFS=$'\n\t' tm_expect_ok "udp delete" tm_iptables_l4_delete_exec udp edge
 tm_expect_ok "iptables tcp apply" tm_iptables_l4_apply_exec tcp web eth0 443 10.200.0.2 443 10.200.0.1 no
+tm_expect_ok "iptables tcp apply again" tm_iptables_l4_apply_exec tcp web eth0 443 10.200.0.2 443 10.200.0.1 no
 if grep -q -- '-p tcp --dport 443' "${TM_FAKE_ROOT}/iptables.log"; then
   tm_pass "iptables tcp DNAT is installed"
 else
   tm_fail "iptables tcp DNAT was not installed"
 fi
+if grep -qF -- "-i tm-+ -m addrtype --dst-type LOCAL -p tcp --dport 443 -m comment --comment tm:tcp:web:tundnat -j DNAT --to-destination 10.200.0.2:443" \
+  "${TM_FAKE_ROOT}/iptables.state"; then
+  tm_pass "iptables tcp DNAT also takes local traffic from the tunnels"
+else
+  tm_fail "iptables tcp DNAT from the tunnels is missing"
+fi
+if grep -qF -- "-I FORWARD 1 -m comment --comment tm:jump:mangle-forward -j TM_FORWARD" "${TM_FAKE_ROOT}/iptables.log" \
+  && grep -qF -- "-p tcp -d 10.200.0.2 --dport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssfwd -j TCPMSS --clamp-mss-to-pmtu" \
+    "${TM_FAKE_ROOT}/iptables.state" \
+  && grep -qF -- "-p tcp -s 10.200.0.2 --sport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssret -j TCPMSS --clamp-mss-to-pmtu" \
+    "${TM_FAKE_ROOT}/iptables.state"; then
+  tm_pass "iptables tcp forward clamps the MSS both ways in mangle"
+else
+  tm_fail "iptables tcp MSS clamp is missing"
+fi
+tm_expect_eq "iptables MSS clamp is not duplicated" \
+  "$(grep -c 'TCPMSS' "${TM_FAKE_ROOT}/iptables.state" || true)" "2"
 tm_expect_ok "tcp delete" tm_iptables_l4_delete_exec tcp web
 if grep -q -- "-X TM_PREROUTING" "${TM_FAKE_ROOT}/iptables.log"; then
   tm_pass "empty chains are removed without a flush"
 else
   tm_fail "empty chain was not deleted"
+fi
+if grep -q 'tm:tcp:web' "${TM_FAKE_ROOT}/iptables.state" \
+  || ! grep -q -- "-t mangle -X TM_FORWARD" "${TM_FAKE_ROOT}/iptables.log"; then
+  tm_fail "tcp delete left the tunnel DNAT or MSS clamp behind"
+else
+  tm_pass "tcp delete removes the tunnel DNAT, the MSS clamp, and the mangle chain"
+fi
+printf '%s\n' addrtype TCPMSS >"${TM_FAKE_ROOT}/iptables.refuse"
+tm_expect_ok "tcp apply on a kernel without addrtype or TCPMSS" \
+  tm_iptables_l4_apply_exec tcp bare eth0 8443 10.200.0.2 8443 10.200.0.1 yes
+if grep -q 'tm:tcp:bare:dnat' "${TM_FAKE_ROOT}/iptables.state" \
+  && ! grep -q 'tm:tcp:bare:tundnat\|TCPMSS' "${TM_FAKE_ROOT}/iptables.state"; then
+  tm_pass "the forward still works on its ingress interface without those modules"
+else
+  tm_fail "a missing addrtype or TCPMSS module changed the forward"
+fi
+rm -f -- "${TM_FAKE_ROOT}/iptables.refuse"
+tm_expect_ok "tcp delete after the kernel refused the extras" tm_iptables_l4_delete_exec tcp bare
+if grep -q 'tm:tcp:bare\|^CHAIN mangle' "${TM_FAKE_ROOT}/iptables.state"; then
+  tm_fail "the forward or an empty mangle chain was left behind"
+else
+  tm_pass "the forward and the empty mangle chain are removed"
 fi
 
 {
@@ -144,6 +192,32 @@ if grep -q "tcp dport 443" "${TM_FAKE_ROOT}/nft.log"; then
 else
   tm_fail "nft tcp DNAT was not installed"
 fi
+if grep -qF 'add rule inet tunnel_manager prerouting iifname "tm-*" fib daddr type local tcp dport 443 dnat to 10.200.0.2:443 comment tm:tcp:web:tundnat' \
+  "${TM_FAKE_ROOT}/nft.log"; then
+  tm_pass "nft tcp DNAT also takes local traffic from the tunnels"
+else
+  tm_fail "nft tcp DNAT from the tunnels is missing"
+fi
+if grep -qF 'add chain inet tunnel_manager mss { type filter hook forward priority mangle; policy accept; }' "${TM_FAKE_ROOT}/nft.log" \
+  && grep -qF 'ip daddr 10.200.0.2 tcp dport 443 tcp flags syn tcp option maxseg size set rt mtu comment tm:tcp:web:mssfwd' \
+    "${TM_FAKE_ROOT}/nft.state" \
+  && grep -qF 'ip saddr 10.200.0.2 tcp sport 443 tcp flags syn tcp option maxseg size set rt mtu comment tm:tcp:web:mssret' \
+    "${TM_FAKE_ROOT}/nft.state"; then
+  tm_pass "nft tcp forward clamps the MSS both ways"
+else
+  tm_fail "nft tcp MSS clamp is missing"
+fi
+if grep -q 'maxseg.*tm:udp:' "${TM_FAKE_ROOT}/nft.state"; then
+  tm_fail "nft udp forward got an MSS clamp"
+else
+  tm_pass "nft udp forward has no MSS clamp"
+fi
+tm_expect_ok "nft tcp delete" tm_fw_l4_delete_exec tcp web
+if grep -q 'tm:tcp:web' "${TM_FAKE_ROOT}/nft.state"; then
+  tm_fail "nft tcp delete left rules behind"
+else
+  tm_pass "nft tcp delete removes the tunnel DNAT and the MSS clamp"
+fi
 tm_expect_ok "nft gre input allow" tm_fw_input_apply_exec edge eth0 203.0.113.20 4
 if grep -q "add rule inet tunnel_manager input iifname eth0 ip saddr 203.0.113.20 meta l4proto gre accept comment tm:gre:edge:input" "${TM_FAKE_ROOT}/nft.log"; then
   tm_pass "nft gre input allow accepts the peer only"
@@ -194,6 +268,15 @@ if grep -q "add rule inet tunnel_manager prerouting" "${TM_FAKE_ROOT}/nft.log"; 
   tm_pass "nft DNAT is still installed"
 else
   tm_fail "nft DNAT was skipped"
+fi
+rm -f -- "${TM_FAKE_ROOT}/nft.log" "${TM_FAKE_ROOT}/nft.state" "${TM_FAKE_ROOT}/nft.handle"
+tm_expect_ok "nft tcp apply beside a foreign filter hook" \
+  tm_fw_l4_apply_exec tcp far eth0 8443 203.0.113.31 8443 203.0.113.10 yes
+if grep -q "priority 0" "${TM_FAKE_ROOT}/nft.log" \
+  || ! grep -q "add rule inet tunnel_manager mss .*comment tm:tcp:far:mssret" "${TM_FAKE_ROOT}/nft.log"; then
+  tm_fail "nft MSS clamp was skipped, or a filter hook was added, beside a foreign filter"
+else
+  tm_pass "nft MSS clamp is installed beside a foreign filter hook"
 fi
 
 tm_finish

@@ -77,7 +77,7 @@ tm_chain_is_builtin() {
 
 tm_iptables_target_ok() {
   case "$1" in
-    ACCEPT|DNAT|SNAT) return 0 ;;
+    ACCEPT|DNAT|SNAT|TCPMSS) return 0 ;;
     TM_*)
       tm_chain_is_ours "$1"
       ;;
@@ -99,13 +99,15 @@ tm_iptables_ctstate_ok() {
 }
 
 tm_iptables_rule_is_safe() {
-  local chain="$1"
-  shift
+  local table="$1"
+  local chain="$2"
+  shift 2
   local -a args=("$@")
   local i=0
   local n=${#args[@]}
   local target="" comment="" proto="" in_iface="" daddr="" saddr=""
   local dport="" sport="" to_dest="" to_src="" ctstate="" module=""
+  local dst_type="" tcp_flags="" clamp=0
   local token
 
   while [[ "$i" -lt "$n" ]]; do
@@ -117,9 +119,24 @@ tm_iptables_rule_is_safe() {
         module="${args[$i]}"
         case "$module" in
           # iptables -S adds -m udp or -m tcp for the protocol already named by -p.
-          comment|conntrack|tcp|udp) ;;
+          comment|conntrack|tcp|udp|addrtype) ;;
           *) return 1 ;;
         esac
+        ;;
+      --dst-type)
+        i=$((i + 1))
+        [[ "$i" -lt "$n" ]] || return 1
+        dst_type="${args[$i]}"
+        [[ "$dst_type" == "LOCAL" ]] || return 1
+        ;;
+      --tcp-flags)
+        [[ "$((i + 2))" -lt "$n" ]] || return 1
+        tcp_flags="${args[$((i + 1))]} ${args[$((i + 2))]}"
+        [[ "$tcp_flags" == "SYN,RST SYN" ]] || return 1
+        i=$((i + 2))
+        ;;
+      --clamp-mss-to-pmtu)
+        clamp=1
         ;;
       --comment)
         i=$((i + 1))
@@ -142,7 +159,8 @@ tm_iptables_rule_is_safe() {
         i=$((i + 1))
         [[ "$i" -lt "$n" ]] || return 1
         in_iface="${args[$i]}"
-        tm_valid_iface "$in_iface" || return 1
+        # tm-+ is every Tunnel Manager tunnel interface.
+        [[ "$in_iface" == "tm-+" ]] || tm_valid_iface "$in_iface" || return 1
         ;;
       -d|--destination)
         i=$((i + 1))
@@ -198,6 +216,12 @@ tm_iptables_rule_is_safe() {
 
   [[ "$comment" =~ ^tm:[a-z0-9:_-]{1,80}$ ]] || return 1
   [[ -n "$target" ]] || return 1
+  if [[ -n "$dst_type" || "$in_iface" == "tm-+" ]]; then
+    [[ "$target" == "DNAT" ]] || return 1
+  fi
+  if [[ -n "$tcp_flags" || "$clamp" == "1" ]]; then
+    [[ "$target" == "TCPMSS" ]] || return 1
+  fi
 
   if tm_chain_is_builtin "$chain"; then
     tm_chain_is_ours "$target" || return 1
@@ -208,12 +232,24 @@ tm_iptables_rule_is_safe() {
   fi
 
   tm_chain_is_ours "$chain" || return 1
+  # mangle holds the MSS clamp and nothing else.
+  if [[ "$table" == "mangle" || "$target" == "TCPMSS" ]]; then
+    [[ "$table" == "mangle" && "$target" == "TCPMSS" && "$chain" == "TM_FORWARD" ]] || return 1
+    [[ "$proto" == "tcp" && "$tcp_flags" == "SYN,RST SYN" && "$clamp" == "1" ]] || return 1
+    [[ -n "$dport" || -n "$sport" ]] || return 1
+    [[ -z "$in_iface" && -z "$ctstate" && -z "$to_dest" && -z "$to_src" ]] || return 1
+    return 0
+  fi
 
   case "$target" in
     DNAT)
       [[ "$chain" == "TM_PREROUTING" ]] || return 1
       [[ "$proto" == "udp" || "$proto" == "tcp" ]] || return 1
       [[ -n "$in_iface" && -n "$dport" && -n "$to_dest" ]] || return 1
+      # On the tunnel interfaces, only traffic addressed to this host is taken.
+      if [[ "$in_iface" == "tm-+" ]]; then
+        [[ "$dst_type" == "LOCAL" ]] || return 1
+      fi
       [[ "$to_dest" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]] || return 1
       tm_ipv4_is_unicast_host "${to_dest%%:*}" || return 1
       tm_valid_port "${to_dest##*:}" || return 1
@@ -282,7 +318,7 @@ tm_iptables_argv_is_safe() {
         [[ "$idx" -lt "$n" ]] || return 1
         table="${args[$idx]}"
         case "$table" in
-          nat|filter) ;;
+          nat|filter|mangle) ;;
           *) return 1 ;;
         esac
         ;;
@@ -325,7 +361,7 @@ tm_iptables_argv_is_safe() {
           tm_chain_is_ours "$chain" || return 1
         fi
         idx=$((idx + 1))
-        tm_iptables_rule_is_safe "$chain" "${args[@]:$idx}" || return 1
+        tm_iptables_rule_is_safe "$table" "$chain" "${args[@]:$idx}" || return 1
         return 0
         ;;
       *)
@@ -343,7 +379,7 @@ tm_nft_comment_ok() {
 
 tm_nft_chain_name_ok() {
   case "$1" in
-    prerouting|postrouting|forward|input) return 0 ;;
+    prerouting|postrouting|forward|input|mss) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -352,6 +388,10 @@ tm_nft_chain_def_ok() {
   case "$1" in
     "{ type nat hook prerouting priority dstnat; policy accept; }"|\
       "{ type nat hook postrouting priority srcnat; policy accept; }")
+      return 0
+      ;;
+    # The MSS clamp never drops, so it is not gated on foreign filter hooks.
+    "{ type filter hook forward priority mangle; policy accept; }")
       return 0
       ;;
     "{ type filter hook forward priority 0; policy accept; }"|\
@@ -405,6 +445,7 @@ tm_nft_rule_tail_is_safe() {
   local chain="$1"
   shift
   local comment="" proto_seen=0 gre_seen=0 iif_seen=0 dport="" to_value="" jump=""
+  local iif_tunnels=0 fib_local=0 syn_seen=0
   local addr_family=4
   local -a args=("$@")
   local i=0 token
@@ -413,8 +454,29 @@ tm_nft_rule_tail_is_safe() {
     case "$token" in
       iifname)
         i=$((i + 1))
-        tm_valid_iface "${args[$i]:-}" || return 1
+        # "tm-*" is every Tunnel Manager tunnel interface.
+        if [[ "${args[$i]:-}" == '"tm-*"' ]]; then
+          iif_tunnels=1
+        else
+          tm_valid_iface "${args[$i]:-}" || return 1
+        fi
         iif_seen=1
+        ;;
+      fib)
+        [[ "${args[$((i + 1))]:-} ${args[$((i + 2))]:-} ${args[$((i + 3))]:-}" == "daddr type local" ]] || return 1
+        i=$((i + 3))
+        fib_local=1
+        ;;
+      flags)
+        [[ "${args[$((i + 1))]:-}" == "syn" ]] || return 1
+        i=$((i + 1))
+        syn_seen=1
+        ;;
+      option)
+        [[ "${args[$((i + 1))]:-} ${args[$((i + 2))]:-} ${args[$((i + 3))]:-} ${args[$((i + 4))]:-} ${args[$((i + 5))]:-}" \
+          == "maxseg size set rt mtu" ]] || return 1
+        i=$((i + 5))
+        jump="mss"
         ;;
       udp|tcp)
         proto_seen=1
@@ -466,9 +528,19 @@ tm_nft_rule_tail_is_safe() {
     i=$((i + 1))
   done
   tm_nft_comment_ok "$comment" || return 1
+  if [[ "$iif_tunnels" -eq 1 || "$fib_local" -eq 1 ]]; then
+    [[ "$chain:$jump" == "prerouting:dnat" ]] || return 1
+  fi
+  if [[ "$syn_seen" -eq 1 || "$jump" == "mss" ]]; then
+    [[ "$chain" == "mss" ]] || return 1
+  fi
   case "$chain:$jump" in
     prerouting:dnat)
       [[ "$proto_seen" -eq 1 && "$iif_seen" -eq 1 && -n "$dport" && -n "$to_value" ]] || return 1
+      # On the tunnel interfaces, only traffic addressed to this host is taken.
+      if [[ "$iif_tunnels" -eq 1 ]]; then
+        [[ "$fib_local" -eq 1 ]] || return 1
+      fi
       tm_port_is_protected "$dport" && return 1
       [[ "$to_value" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]] || return 1
       tm_ipv4_is_unicast_host "${to_value%%:*}" || return 1
@@ -483,6 +555,9 @@ tm_nft_rule_tail_is_safe() {
       ;;
     input:accept)
       [[ "$iif_seen" -eq 1 && "$gre_seen" -eq 1 && "$proto_seen" -eq 0 && -z "$dport" ]] || return 1
+      ;;
+    mss:mss)
+      [[ "$proto_seen" -eq 1 && "$syn_seen" -eq 1 && -n "$dport" && "$iif_seen" -eq 0 ]] || return 1
       ;;
     *)
       return 1

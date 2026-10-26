@@ -355,7 +355,7 @@ tm_action_forward_add() {
   tm_plan_add "Write ${proto} forward '${name}' (${listen_ip}:${listen_port} -> ${dest_ip}:${dest_port}, snat ${snat})" \
     "$(tm_shell_quote tm_forward_file_undo "$name" "$proto")" \
     tm_forward_file_write_exec "$name" "$proto" "$listen_ip" "$listen_port" "$dest_ip" "$dest_port" "$snat" "$ingress" "$source_ip" "$tunnel_ref"
-  tm_plan_add "Install ${proto} DNAT ${ingress}:${listen_port} -> ${dest_ip}:${dest_port} (snat ${decision}) using dedicated chains" \
+  tm_plan_add "Install ${proto} DNAT ${ingress}:${listen_port} and tm-*:${listen_port} -> ${dest_ip}:${dest_port} (snat ${decision}) using dedicated chains" \
     "$(tm_shell_quote tm_fw_l4_delete_exec "$proto" "$name")" \
     tm_fw_l4_apply_exec "$proto" "$name" "$ingress" "$listen_port" "$dest_ip" "$dest_port" "$source_ip" "$decision"
   tm_plan_add "Synchronize net.ipv4.ip_forward for saved forwards" \

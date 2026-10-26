@@ -55,6 +55,19 @@ safe=(
   "ip addr add 2001:db8:1::1/64 dev tm-edge"
   "ip6tables -t filter -A TM_INPUT -i eth0 -p gre -m comment --comment tm:gre:edge:input -j ACCEPT"
   "ping -6 -c 3 -W 2 2001:db8:1::2"
+  "iptables -t nat -A TM_PREROUTING -i tm-+ -m addrtype --dst-type LOCAL -p tcp --dport 443 -m comment --comment tm:tcp:web:tundnat -j DNAT --to-destination 203.0.113.31:443"
+  "iptables -t nat -D TM_PREROUTING -i tm-+ -p tcp -m addrtype --dst-type LOCAL -m tcp --dport 443 -m comment --comment tm:tcp:web:tundnat -j DNAT --to-destination 203.0.113.31:443"
+  "iptables -t mangle -N TM_FORWARD"
+  "iptables -t mangle -X TM_FORWARD"
+  "iptables -t mangle -I FORWARD 1 -m comment --comment tm:jump:mangle-forward -j TM_FORWARD"
+  "iptables -t mangle -A TM_FORWARD -p tcp -d 10.200.0.2 --dport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssfwd -j TCPMSS --clamp-mss-to-pmtu"
+  "iptables -t mangle -A TM_FORWARD -p tcp -s 10.200.0.2 --sport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssret -j TCPMSS --clamp-mss-to-pmtu"
+  "iptables -t mangle -D TM_FORWARD -s 203.0.113.31/32 -p tcp -m tcp --sport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssret -j TCPMSS --clamp-mss-to-pmtu"
+  'nft add rule inet tunnel_manager prerouting iifname "tm-*" fib daddr type local tcp dport 443 dnat to 203.0.113.31:443 comment tm:tcp:web:tundnat'
+  "nft add rule inet tunnel_manager mss ip daddr 10.200.0.2 tcp dport 443 tcp flags syn tcp option maxseg size set rt mtu comment tm:tcp:web:mssfwd"
+  "nft add rule inet tunnel_manager mss ip saddr 10.200.0.2 tcp sport 443 tcp flags syn tcp option maxseg size set rt mtu comment tm:tcp:web:mssret"
+  "nft -a list chain inet tunnel_manager mss"
+  "nft delete rule inet tunnel_manager mss handle 7"
 )
 
 unsafe=(
@@ -106,6 +119,22 @@ unsafe=(
   "modprobe ipip"
   "rm -rf /"
   "bash -c true"
+  "iptables -t nat -A TM_PREROUTING -i tm-+ -p tcp --dport 443 -m comment --comment tm:tcp:web:tundnat -j DNAT --to-destination 203.0.113.31:443"
+  "iptables -t nat -A TM_PREROUTING -i eth0 -m addrtype --dst-type UNICAST -p tcp --dport 443 -m comment --comment tm:tcp:web:tundnat -j DNAT --to-destination 203.0.113.31:443"
+  "iptables -t nat -A TM_PREROUTING -i tm-+ -m addrtype --dst-type LOCAL -p tcp --dport 22 -m comment --comment tm:tcp:web:tundnat -j DNAT --to-destination 203.0.113.31:22"
+  "iptables -t filter -A TM_INPUT -i tm-+ -p gre -m comment --comment tm:gre:edge:input -j ACCEPT"
+  "iptables -t raw -A TM_FORWARD -p tcp -d 10.200.0.2 --dport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssfwd -j TCPMSS --clamp-mss-to-pmtu"
+  "iptables -t filter -A TM_FORWARD -p tcp -d 10.200.0.2 --dport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssfwd -j TCPMSS --clamp-mss-to-pmtu"
+  "iptables -t mangle -A TM_FORWARD -p tcp -d 10.200.0.2 --dport 443 -m conntrack --ctstate NEW,ESTABLISHED -m comment --comment tm:tcp:web:fwd -j ACCEPT"
+  "iptables -t mangle -A TM_FORWARD -p tcp -d 10.200.0.2 --dport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssfwd -j TCPMSS --set-mss 9000"
+  "iptables -t mangle -A TM_FORWARD -p tcp -d 10.200.0.2 --dport 443 --tcp-flags ALL SYN -m comment --comment tm:tcp:web:mssfwd -j TCPMSS --clamp-mss-to-pmtu"
+  "iptables -t mangle -A TM_FORWARD -p tcp --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssfwd -j TCPMSS --clamp-mss-to-pmtu"
+  "iptables -t mangle -A FORWARD -p tcp -d 10.200.0.2 --dport 443 --tcp-flags SYN,RST SYN -m comment --comment tm:tcp:web:mssfwd -j TCPMSS --clamp-mss-to-pmtu"
+  'nft add rule inet tunnel_manager prerouting iifname "tm-*" tcp dport 443 dnat to 203.0.113.31:443 comment tm:tcp:web:tundnat'
+  'nft add rule inet tunnel_manager input iifname "tm-*" meta l4proto gre accept comment tm:gre:edge:input'
+  "nft add rule inet tunnel_manager forward ip daddr 10.200.0.2 tcp dport 443 tcp flags syn tcp option maxseg size set rt mtu comment tm:tcp:web:mssfwd"
+  "nft add rule inet tunnel_manager mss ip daddr 10.200.0.2 tcp dport 443 tcp flags syn tcp option maxseg size set 9000 comment tm:tcp:web:mssfwd"
+  "nft add rule inet tunnel_manager mss ip daddr 10.200.0.2 tcp dport 443 accept comment tm:tcp:web:mssfwd"
 )
 
 check_words() {
@@ -130,5 +159,10 @@ check_words() {
 
 check_words safe "${safe[@]}"
 check_words unsafe "${unsafe[@]}"
+
+tm_expect_ok "allows the nft MSS chain" \
+  tm_argv_is_safe nft add chain inet tunnel_manager mss '{ type filter hook forward priority mangle; policy accept; }'
+tm_expect_fail "rejects an nft MSS chain that drops" \
+  tm_argv_is_safe nft add chain inet tunnel_manager mss '{ type filter hook forward priority mangle; policy drop; }'
 
 tm_finish

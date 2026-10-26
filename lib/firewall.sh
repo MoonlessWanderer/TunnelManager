@@ -343,6 +343,7 @@ tm_iptables_gc() {
     "nat TM_POSTROUTING POSTROUTING tm:jump:nat-postrouting"
     "filter TM_FORWARD FORWARD tm:jump:filter-forward"
     "filter TM_INPUT INPUT tm:jump:filter-input"
+    "mangle TM_FORWARD FORWARD tm:jump:mangle-forward"
   )
   for row in "${rows[@]}"; do
     IFS=$' \t\n' read -r table chain from comment <<<"$row"
@@ -370,9 +371,10 @@ tm_iptables_l4_apply_exec() {
   local dest_port="$6"
   local source_ip="$7"
   local do_snat="$8"
-  local c_dnat c_snat c_fwd c_ret
+  local c_dnat c_tun c_snat c_fwd c_ret
   tm_l4_proto_ok "$proto" || return 1
   c_dnat=$(tm_fw_comment "${proto}:${name}:dnat")
+  c_tun=$(tm_fw_comment "${proto}:${name}:tundnat")
   c_snat=$(tm_fw_comment "${proto}:${name}:snat")
   c_fwd=$(tm_fw_comment "${proto}:${name}:fwd")
   c_ret=$(tm_fw_comment "${proto}:${name}:fwdret")
@@ -380,6 +382,14 @@ tm_iptables_l4_apply_exec() {
   tm_iptables_add_if_missing \
     iptables -t nat -A TM_PREROUTING -i "$iface" -p "$proto" --dport "$lport" \
     -m comment --comment "$c_dnat" -j DNAT --to-destination "${dest_ip}:${dest_port}" || return 1
+  # Traffic that reached this host through a tunnel, as on the middle server
+  # of a chain, arrives on tm-* and not on the ingress interface.
+  if ! tm_iptables_add_if_missing \
+    iptables -t nat -A TM_PREROUTING -i tm-+ -m addrtype --dst-type LOCAL \
+    -p "$proto" --dport "$lport" \
+    -m comment --comment "$c_tun" -j DNAT --to-destination "${dest_ip}:${dest_port}"; then
+    tm_fw_warn_tunnel_dnat "$name" "$iface"
+  fi
   if [[ "$do_snat" == "yes" ]]; then
     tm_iptables_add_if_missing \
       iptables -t nat -A TM_POSTROUTING -p "$proto" -d "$dest_ip" --dport "$dest_port" \
@@ -391,6 +401,41 @@ tm_iptables_l4_apply_exec() {
   tm_iptables_add_if_missing \
     iptables -t filter -A TM_FORWARD -p "$proto" -s "$dest_ip" --sport "$dest_port" \
     -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$c_ret" -j ACCEPT || return 1
+  if [[ "$proto" == "tcp" ]] && ! tm_iptables_mss_apply_exec "$name" "$dest_ip" "$dest_port"; then
+    tm_fw_warn_mss "$name"
+  fi
+}
+
+# The tunnel DNAT and the MSS clamp need addrtype and TCPMSS (fib and rt on
+# nft). A kernel without them, as in some containers, keeps the forward on
+# its ingress interface and gets a warning instead of a failed apply.
+tm_fw_warn_tunnel_dnat() {
+  tm_warn "Forward ${1} works on ${2}, but not for traffic that arrives over a tunnel. The kernel refused that rule."
+}
+
+tm_fw_warn_mss() {
+  tm_warn "Forward ${1} has no MSS clamp, because the kernel refused it. Large TCP packets may stall in a tunnel."
+}
+
+# The two ends of a forwarded connection agree on an MSS for a 1500-byte
+# path, which is too large for the GRE link. Each SYN is clamped to the MTU
+# of the route it leaves on, so the clamp only bites where it goes into a
+# tunnel. It sits in mangle, so the accept rules in filter do not skip it.
+tm_iptables_mss_apply_exec() {
+  local name="$1"
+  local dest_ip="$2"
+  local dest_port="$3"
+  local c_out c_back
+  c_out=$(tm_fw_comment "tcp:${name}:mssfwd")
+  c_back=$(tm_fw_comment "tcp:${name}:mssret")
+  tm_iptables_ensure_chain mangle TM_FORWARD || return 1
+  tm_iptables_ensure_jump mangle FORWARD TM_FORWARD tm:jump:mangle-forward || return 1
+  tm_iptables_add_if_missing \
+    iptables -t mangle -A TM_FORWARD -p tcp -d "$dest_ip" --dport "$dest_port" --tcp-flags SYN,RST SYN \
+    -m comment --comment "$c_out" -j TCPMSS --clamp-mss-to-pmtu || return 1
+  tm_iptables_add_if_missing \
+    iptables -t mangle -A TM_FORWARD -p tcp -s "$dest_ip" --sport "$dest_port" --tcp-flags SYN,RST SYN \
+    -m comment --comment "$c_back" -j TCPMSS --clamp-mss-to-pmtu || return 1
 }
 
 tm_iptables_l4_delete_exec() {
@@ -398,9 +443,12 @@ tm_iptables_l4_delete_exec() {
   local name="$2"
   tm_l4_proto_ok "$proto" || return 1
   tm_iptables_delete_comment nat TM_PREROUTING "$(tm_fw_comment "${proto}:${name}:dnat")" || return 1
+  tm_iptables_delete_comment nat TM_PREROUTING "$(tm_fw_comment "${proto}:${name}:tundnat")" || return 1
   tm_iptables_delete_comment nat TM_POSTROUTING "$(tm_fw_comment "${proto}:${name}:snat")" || return 1
   tm_iptables_delete_comment filter TM_FORWARD "$(tm_fw_comment "${proto}:${name}:fwd")" || return 1
   tm_iptables_delete_comment filter TM_FORWARD "$(tm_fw_comment "${proto}:${name}:fwdret")" || return 1
+  tm_iptables_delete_comment mangle TM_FORWARD "$(tm_fw_comment "${proto}:${name}:mssfwd")" || return 1
+  tm_iptables_delete_comment mangle TM_FORWARD "$(tm_fw_comment "${proto}:${name}:mssret")" || return 1
   tm_iptables_gc || return 1
 }
 
@@ -512,14 +560,19 @@ tm_nft_l4_apply_exec() {
   local dest_port="$6"
   local source_ip="$7"
   local do_snat="$8"
-  local c_dnat c_snat c_fwd c_ret
+  local c_dnat c_tun c_snat c_fwd c_ret
   tm_l4_proto_ok "$proto" || return 1
   c_dnat=$(tm_fw_comment "${proto}:${name}:dnat")
+  c_tun=$(tm_fw_comment "${proto}:${name}:tundnat")
   c_snat=$(tm_fw_comment "${proto}:${name}:snat")
   c_fwd=$(tm_fw_comment "${proto}:${name}:fwd")
   c_ret=$(tm_fw_comment "${proto}:${name}:fwdret")
   tm_nft_ensure_base || return 1
   tm_nft_add_rule prerouting "$c_dnat" iifname "$iface" "$proto" dport "$lport" dnat to "${dest_ip}:${dest_port}" || return 1
+  if ! tm_nft_add_rule prerouting "$c_tun" iifname '"tm-*"' fib daddr type local \
+    "$proto" dport "$lport" dnat to "${dest_ip}:${dest_port}"; then
+    tm_fw_warn_tunnel_dnat "$name" "$iface"
+  fi
   if [[ "$do_snat" == "yes" ]]; then
     tm_nft_add_rule postrouting "$c_snat" ip daddr "$dest_ip" "$proto" dport "$dest_port" snat to "$source_ip" || return 1
   fi
@@ -527,6 +580,21 @@ tm_nft_l4_apply_exec() {
     tm_nft_add_rule forward "$c_fwd" "$proto" dport "$dest_port" ip daddr "$dest_ip" accept || return 1
     tm_nft_add_rule forward "$c_ret" "$proto" sport "$dest_port" ip saddr "$dest_ip" accept || return 1
   fi
+  if [[ "$proto" == "tcp" ]] && ! tm_nft_mss_apply_exec "$name" "$dest_ip" "$dest_port"; then
+    tm_fw_warn_mss "$name"
+  fi
+}
+
+# The mss chain never drops, so it is added beside a foreign filter hook too.
+tm_nft_mss_apply_exec() {
+  local name="$1"
+  local dest_ip="$2"
+  local dest_port="$3"
+  tm_nft_ensure_chain mss '{ type filter hook forward priority mangle; policy accept; }' || return 1
+  tm_nft_add_rule mss "$(tm_fw_comment "tcp:${name}:mssfwd")" ip daddr "$dest_ip" tcp dport "$dest_port" \
+    tcp flags syn tcp option maxseg size set rt mtu || return 1
+  tm_nft_add_rule mss "$(tm_fw_comment "tcp:${name}:mssret")" ip saddr "$dest_ip" tcp sport "$dest_port" \
+    tcp flags syn tcp option maxseg size set rt mtu || return 1
 }
 
 tm_nft_l4_delete_exec() {
@@ -534,9 +602,12 @@ tm_nft_l4_delete_exec() {
   local name="$2"
   tm_l4_proto_ok "$proto" || return 1
   tm_nft_delete_comment prerouting "$(tm_fw_comment "${proto}:${name}:dnat")" || return 1
+  tm_nft_delete_comment prerouting "$(tm_fw_comment "${proto}:${name}:tundnat")" || return 1
   tm_nft_delete_comment postrouting "$(tm_fw_comment "${proto}:${name}:snat")" || return 1
   tm_nft_delete_comment forward "$(tm_fw_comment "${proto}:${name}:fwd")" || return 1
   tm_nft_delete_comment forward "$(tm_fw_comment "${proto}:${name}:fwdret")" || return 1
+  tm_nft_delete_comment mss "$(tm_fw_comment "${proto}:${name}:mssfwd")" || return 1
+  tm_nft_delete_comment mss "$(tm_fw_comment "${proto}:${name}:mssret")" || return 1
 }
 
 tm_nft_input_apply_exec() {

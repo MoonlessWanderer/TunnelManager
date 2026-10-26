@@ -62,6 +62,24 @@ only a tunnel that this run started.
 TCP and UDP use the same firewall NAT path. Both are IPv4 only. The tunnel
 itself may still be IPv6. A saved forward sets `net.ipv4.ip_forward=1`.
 
+Each forward has two DNAT rules. One matches the ingress interface. The other
+matches any `tm-*` interface, but only for packets addressed to this host
+(`addrtype LOCAL`, or `fib daddr type local` on nft). The second rule is for a
+server in the middle of a chain, such as Iran to Germany over GRE and then
+Germany to a third server: traffic from Iran reaches Germany on its GRE
+interface, not on the WAN. Traffic that only passes through a tunnel is not
+taken.
+
+A TCP forward also clamps the MSS of its SYN packets, in both directions, to
+the MTU of the route each one leaves on. Two ends that never see the GRE link
+would otherwise agree on an MSS for a 1500-byte path. Their full-size segments
+then do not fit the tunnel, and the connection stalls when PMTU discovery is
+blocked. The clamp only changes a SYN that leaves through a tunnel.
+
+If the kernel refuses the tunnel DNAT or the clamp, for example in a
+container without `addrtype` or `TCPMSS`, the forward keeps its ingress rule
+and apply prints a warning instead of failing.
+
 `forward add`, `forward edit` with a new protocol or port, and setup refuse
 a listen port that is already taken outside Tunnel Manager. Taken means `ss`
 shows a listener on a non-loopback address, or `iptables -t nat -S` or
@@ -81,7 +99,8 @@ The active backend is detected from `iptables -V` and the presence of
 - A pin uses only that backend.
 
 iptables rules live in `TM_PREROUTING`, `TM_POSTROUTING`, `TM_FORWARD`, and
-`TM_INPUT`. Jumps from the builtin chains are inserted at position 1 with a
+`TM_INPUT`, plus a `TM_FORWARD` chain in the mangle table that holds only the
+MSS clamp. Jumps from the builtin chains are inserted at position 1 with a
 `tm:jump:*` comment. Non-matching packets return to the existing rules.
 Deletion removes individual rules. An empty managed chain is deleted with
 `-X` after its jump is removed. `-F` and `-P` are not used.
@@ -89,7 +108,9 @@ Deletion removes individual rules. An empty managed chain is deleted with
 nftables uses `table inet tunnel_manager` only. NAT chains are always
 created. Filter base chains are created only when `nft list ruleset` shows
 no foreign `hook input` or `hook forward`. If that check fails, NAT rules
-are still installed and filter rules are skipped.
+are still installed and filter rules are skipped. The `mss` chain hooks
+forward at mangle priority. It only rewrites the MSS and never drops, so it
+is created beside a foreign filter hook too.
 
 SNAT is `auto`, `always`, or `never`. `auto` does not SNAT when the
 destination is this host's tunnel address. It does SNAT for the peer tunnel

@@ -31,7 +31,11 @@ foreign server. The plan prints descriptions rather than command argv.
 ## Firewall interaction
 
 Managed jumps are inserted at the top of `INPUT`, `FORWARD`, `PREROUTING`, and
-`POSTROUTING`, but only toward chains that return for non-matching packets.
+`POSTROUTING`, and of mangle `FORWARD` for the MSS clamp, but only toward
+chains that return for non-matching packets. The mangle chain may hold only
+`TCPMSS --clamp-mss-to-pmtu` on SYN packets of a forward's address and port.
+A DNAT rule on the `tm-*` wildcard must also require a local destination
+address.
 Existing SSH rules continue to run. On nftables, a foreign filter hook blocks
 creation of a policy-accept filter chain so Tunnel Manager does not wrap
 another firewall.

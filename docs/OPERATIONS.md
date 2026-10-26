@@ -130,6 +130,13 @@ sudo tunnel-manager forward add --name dns --proto udp --listen-port 5300 \
 `forward test` checks that the firewall DNAT rule is present. It does not
 claim end-to-end success for TCP or UDP.
 
+A forward also takes connections that arrive over any Tunnel Manager tunnel
+and are addressed to this server. So a chain works without extra steps: Iran
+forwards port 443 over GRE to Germany, and Germany forwards port 443 to a
+third server. TCP forwards clamp the MSS, so full-size packets fit the tunnel.
+After an update, run `sudo tunnel-manager apply` once so saved forwards get
+both rules.
+
 Edit and delete:
 
 ```bash
