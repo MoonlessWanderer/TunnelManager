@@ -17,7 +17,7 @@ else
   tm_fail "tm does not open the menu"
 fi
 installed_version=$(bash "${prefix}/bin/tunnel-manager" version)
-tm_expect_eq "installed version" "$installed_version" "2.0.1"
+tm_expect_eq "installed version" "$installed_version" "2.0.2"
 bash "${TM_REPO}/uninstall.sh" --prefix "$prefix" --yes --skip-down
 if [[ ! -e "${prefix}/bin/tunnel-manager" && ! -e "${prefix}/bin/tm" && ! -e "${prefix}/lib/tunnel-manager" ]]; then
   tm_pass "uninstall removes installed files"

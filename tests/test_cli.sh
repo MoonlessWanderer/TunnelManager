@@ -6,7 +6,7 @@ tm_test_reset
 
 bin="${TM_REPO}/bin/tunnel-manager"
 version=$(bash "$bin" version)
-tm_expect_eq "version" "$version" "2.0.1"
+tm_expect_eq "version" "$version" "2.0.2"
 bash "$bin" help >/dev/null
 tm_pass "help exits successfully"
 
@@ -69,7 +69,7 @@ TM_MENU_NOTE=""
 if [[ "$menu_text" == *"Tunnel Manager"* && "$menu_text" == *"Manage Tunnels"* \
   && "$menu_text" == *"No tunnels are saved."* && "$menu_text" == *"1  edge"* \
   && "$menu_text" == *"2  Maintenance"* && "$menu_text" == *"0  Back"* \
-  && "$menu_text" != *$'\033'* && "$menu_text" != *"2.0.1"* ]]; then
+  && "$menu_text" != *$'\033'* && "$menu_text" != *"2.0.2"* ]]; then
   tm_pass "menu screen is plain text when color is off"
 else
   tm_fail "menu screen was not the plain layout"
@@ -79,7 +79,7 @@ TM_MENU_COLOR=1
 menu_color=$(tm_menu_render "" "Exit" "Configure a New Tunnel" "Enable BBR")
 TM_MENU_COLOR=0
 if [[ "$menu_color" == *$'\033[36m'* && "$menu_color" == *"Tunnel Manager"* \
-  && "$menu_color" == *"2.0.1"* && "$menu_color" == *"Configure a New Tunnel"* \
+  && "$menu_color" == *"2.0.2"* && "$menu_color" == *"Configure a New Tunnel"* \
   && "$menu_color" == *"Enable BBR"* && "$menu_color" == *"Exit"* \
   && "$menu_color" != *$'\033[31m'* && "$menu_color" != *"════"* ]]; then
   tm_pass "menu screen uses a quiet accent and the version on the main page"
